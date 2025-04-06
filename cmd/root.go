@@ -32,6 +32,12 @@ func Run(cmd *cobra.Command, args []string) {
 	// parseState = parseState
 	parseState.processNode(rootNode)
 
+	// After all directives are processed, we need to check if we have any trailing comments to add.
+	if parseState.CurrentLine < len(parseState.AllOriginalLines) {
+		// Add the rest of the file
+		parseState.addLines(parseState.AllOriginalLines[parseState.CurrentLine:])
+	}
+
 	// Write parseState.Output to stdout
 	fmt.Printf("%s", parseState.Output)
 	// PrintAST(rootNode, 0)
@@ -235,6 +241,8 @@ func formatRun(n *ExtendedNode) string {
 	// Get the original RUN command text
 
 	hereDoc := false
+	flags := n.Node.Flags
+
 	var content string
 	if len(n.Node.Heredocs) > 1 {
 		// Not implemented yet
@@ -242,10 +250,11 @@ func formatRun(n *ExtendedNode) string {
 	} else if len(n.Node.Heredocs) == 1 {
 		content = n.Node.Heredocs[0].Content
 		hereDoc = true
-		// doc.FileDescriptor == 0
+		// TODO: check if doc.FileDescriptor == 0?
 	} else {
-		parts := regexp.MustCompile(" ").Split(n.OriginalMultiline, 2)
-		content = parts[1]
+		// We split the original multiline string by whitespace
+		parts := regexp.MustCompile("[ \t]").Split(n.OriginalMultiline, 2+len(flags))
+		content = parts[1+len(flags)]
 	}
 
 	if !hereDoc {
@@ -267,6 +276,10 @@ func formatRun(n *ExtendedNode) string {
 
 	if hereDoc {
 		content = "<<" + n.Node.Heredocs[0].Name + "\n" + content + n.Node.Heredocs[0].Name
+	}
+
+	if len(flags) > 0 {
+		content = strings.Join(flags, " ") + " " + content
 	}
 
 	return strings.ToUpper(n.Value) + " " + content
@@ -322,8 +335,12 @@ func formatCmd(n *ExtendedNode) string {
 }
 
 func formatCopy(n *ExtendedNode) string {
-	cmd := getCmd(n.Next)
-	return strings.ToUpper(n.Value) + " " + strings.Join(cmd, " ")
+	cmd := strings.Join(getCmd(n.Next), " ")
+	if len(n.Node.Flags) > 0 {
+		cmd = strings.Join(n.Node.Flags, " ") + " " + cmd
+	}
+
+	return strings.ToUpper(n.Value) + " " + cmd + "\n"
 }
 
 func formatMaintainer(n *ExtendedNode) string {
@@ -333,6 +350,13 @@ func formatMaintainer(n *ExtendedNode) string {
 	return "LABEL org.opencontainers.image.authors=\"" + maintainer + "\"\n"
 }
 
+func (df *ParseState) addLines(lines []string) {
+	missingContent := stripWhitespace(strings.Join(lines, ""), false)
+	// Replace multiple newlines with a single newline
+	re := regexp.MustCompile(`\n{2,}`)
+	missingContent = re.ReplaceAllString(missingContent, "\n")
+	df.Output += missingContent
+}
 func (df *ParseState) processNode(ast *ExtendedNode) {
 
 	// We don't want to process nodes that don't have a start or end line.
@@ -343,18 +367,14 @@ func (df *ParseState) processNode(ast *ExtendedNode) {
 	// check if we are on the correct line,
 	// otherwise get the comments we are missing
 	if df.CurrentLine != ast.StartLine {
-		missingContent := stripWhitespace(strings.Join(df.AllOriginalLines[df.CurrentLine:ast.StartLine-1], ""), false)
-		// Replace multiple newlines with a single newline
-		re := regexp.MustCompile(`\n{2,}`)
-		missingContent = re.ReplaceAllString(missingContent, "\n")
-		df.Output += missingContent
+		df.addLines(df.AllOriginalLines[df.CurrentLine : ast.StartLine-1])
 		df.CurrentLine = ast.StartLine
 	}
 
 	nodeName := strings.ToLower(ast.Node.Value)
 
 	dispatch := map[string]func(*ExtendedNode) string{
-		command.Add:         formatNoop,
+		command.Add:         formatCopy,
 		command.Arg:         formatNoop,
 		command.Cmd:         formatCmd,
 		command.Copy:        formatCopy,
@@ -363,7 +383,7 @@ func (df *ParseState) processNode(ast *ExtendedNode) {
 		command.Expose:      formatNoop,
 		command.From:        formatNoop,
 		command.Healthcheck: formatNoop,
-		command.Label:       formatNoop,
+		command.Label:       formatNoop, // TODO: order labels
 		command.Maintainer:  formatMaintainer,
 		command.Onbuild:     formatNoop,
 		command.Run:         formatRun,
@@ -376,14 +396,14 @@ func (df *ParseState) processNode(ast *ExtendedNode) {
 
 	fmtFunc := dispatch[nodeName]
 	if fmtFunc != nil {
-		if df.Output != "" {
-			// If the previous line isn't a comment or newline, add a newline
-			lastTwoChars := df.Output[len(df.Output)-2 : len(df.Output)]
-			lastNonTrailingNewline := strings.LastIndex(strings.TrimRight(df.Output, "\n"), "\n")
-			if lastTwoChars != "\n\n" && df.Output[lastNonTrailingNewline+1] != '#' {
-				df.Output += "\n"
-			}
-		}
+		// if df.Output != "" {
+		// 	// If the previous line isn't a comment or newline, add a newline
+		// 	lastTwoChars := df.Output[len(df.Output)-2 : len(df.Output)]
+		// 	lastNonTrailingNewline := strings.LastIndex(strings.TrimRight(df.Output, "\n"), "\n")
+		// 	if lastTwoChars != "\n\n" && df.Output[lastNonTrailingNewline+1] != '#' {
+		// 		df.Output += "\n"
+		// 	}
+		// }
 
 		df.Output += fmtFunc(ast)
 		df.CurrentLine = ast.EndLine
