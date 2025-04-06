@@ -5,12 +5,27 @@ Dockerfile format and parser, and a modern version [dockfmt](https://github.com/
 ## Features
 
 - Format `RUN` steps with <https://github.com/mvdan/sh>
-- Support for basic heredocs
+- Support for basic heredocs:
+
+```dockerfile
+RUN <<EOF
+echo "hello"
+echo "world"
+EOF
+```
+
 - Support for basic inline comments in run steps:
 
 ```dockerfile
 RUN echo "hello" \
     # this is a comment
+    && echo "world"
+```
+
+```dockerfile
+RUN echo "hello" \
+    # this is a comment
+    # that spans multiple lines
     && echo "world"
 ```
 

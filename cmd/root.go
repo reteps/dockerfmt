@@ -273,20 +273,20 @@ func formatRun(n *ExtendedNode) string {
 		content = outStr + "\n"
 	} else {
 		if !hereDoc {
-			// Replace line continuations with comments to use bash comment style
-			re := regexp.MustCompile(`(\\\s*\n\s*)(#.*)`)
-			content = re.ReplaceAllString(content, "$1`$2` \\")
-
-			// Remove whitespace at the end of lines
+			// Replace comments with a subshell evaluation -- they won't be run so we can do this.
 			content = stripWhitespace(content, true)
+			re := regexp.MustCompile(`(\\\n\s+)((?:\s*#.*){1,})`)
+			content = re.ReplaceAllString(content, `$1$( $2`+"\n"+`) \`)
+			// log.Printf("Content: %s\n", content)
 		}
 
 		// Now that we have a valid bash-style command, we can format it with shfmt
 		content = formatBash(content)
 
 		if !hereDoc {
-			// Recover original dockerfile-style comments
-			content = regexp.MustCompile(" *`(#.*)`..").ReplaceAllString(content, strings.Repeat(" ", 4)+"$1")
+			// Recover comments $( #...)
+			content = regexp.MustCompile(`\$\(\s+(#[\w\W]*?)\s+\) \\`).ReplaceAllString(content, "$1")
+			content = regexp.MustCompile(" *(#.*)").ReplaceAllString(content, strings.Repeat(" ", 4)+"$1")
 		}
 
 		if hereDoc {

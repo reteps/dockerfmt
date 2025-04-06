@@ -4,10 +4,13 @@ RUN chmod +x /PrairieLearn/scripts/init.sh \
     && mkdir /course{,{2..9}} \
     && mkdir -p /workspace_{main,host}_zips \
     && mkdir -p /jobs \
-    # Here is a comment in the middle of my command
+    # Here is a comment in the middle of my command -- `docker run -it --rm`
     && /PrairieLearn/scripts/start_postgres.sh \
                 && cd /PrairieLearn \               
     && make build \
+    # Here is a multiline comment in my command
+    # The parser has to handle this case, and strip out the
+    # $() chars surrounding
     && node apps/prairielearn/dist/server.js --migrate-and-exit \            
     && su postgres -c "createuser -s root" \
     && /PrairieLearn/scripts/start_postgres.sh stop \
