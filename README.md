@@ -2,6 +2,14 @@
 
 Dockerfile format and parser, and a modern version [dockfmt](https://github.com/jessfraz/dockfmt). Built on top of the internal [buildkit](github.com/moby/buildkit) parser.
 
+## Usage
+
+```bash
+dockerfmt version
+dockerfmt --check <file1> <file2> ...
+dockerfmt <file1> <file2> ...
+```
+
 ## Features
 
 - Format `RUN` steps with <https://github.com/mvdan/sh>
