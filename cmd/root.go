@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -17,49 +16,66 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 )
 
+var (
+	writeFlag   bool
+	checkFlag   bool
+	newlineFlag bool
+	indentSize  uint
+)
+
 var rootCmd = &cobra.Command{
 	Use:   "dockerfmt [Dockerfile]",
 	Short: "dockerfmt is a Dockerfile and RUN step formatter.",
 	Long:  `A updated version of the dockfmt. Uses the dockerfile parser from moby/buildkit and the shell formatter from mvdan/sh`,
 	Run:   Run,
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MinimumNArgs(1),
 }
 
 func Run(cmd *cobra.Command, args []string) {
-	fileName := args[0]
+	for _, fileName := range args {
+		parseState, rootNode := BuildParseStateFromFile(fileName)
+		parseState.processNode(rootNode)
 
-	parseState, rootNode := BuildParseStateFromFile(fileName)
-	// parseState = parseState
-	parseState.processNode(rootNode)
+		// After all directives are processed, we need to check if we have any trailing comments to add.
+		if parseState.CurrentLine < len(parseState.AllOriginalLines) {
+			// Add the rest of the file
+			parseState.addLines(parseState.AllOriginalLines[parseState.CurrentLine:])
+		}
 
-	// After all directives are processed, we need to check if we have any trailing comments to add.
-	if parseState.CurrentLine < len(parseState.AllOriginalLines) {
-		// Add the rest of the file
-		parseState.addLines(parseState.AllOriginalLines[parseState.CurrentLine:])
+		// Ensure the output ends with a newline if requested
+		if newlineFlag {
+			if parseState.Output[len(parseState.Output)-1] != '\n' {
+				parseState.Output += "\n"
+			}
+		} else {
+			parseState.Output = strings.TrimSuffix(parseState.Output, "\n")
+		}
+
+		if checkFlag {
+			// Check if the file is already formatted
+			originalContent := strings.Join(parseState.AllOriginalLines, "")
+			if originalContent != parseState.Output {
+				fmt.Printf("File %s is not formatted\n", fileName)
+				os.Exit(1)
+			}
+		} else if writeFlag {
+			// Write the formatted output back to the file
+			err := os.WriteFile(fileName, []byte(parseState.Output), 0644)
+			if err != nil {
+				log.Fatalf("Failed to write to file %s: %v", fileName, err)
+			}
+		} else {
+			// Print the formatted output to stdout
+			fmt.Printf("%s", parseState.Output)
+		}
 	}
-
-	// Write parseState.Output to stdout
-	fmt.Printf("%s", parseState.Output)
-	// PrintAST(rootNode, 0)
-
-	// nodes := []*parser.Node{ast}
-	// if ast.Children != nil {
-	// 	nodes = append(nodes, ast.Children...)
-	// }
-	// Print out the AST
-	// We shouldn't have more than two levels of nodes
-	/*
-		node
-			- child
-		next
-			- child1
-			- child2
-	*/
-
 }
 
 func init() {
-	// todo: debug flag
+	rootCmd.Flags().BoolVarP(&writeFlag, "write", "w", false, "Write the formatted output back to the file(s)")
+	rootCmd.Flags().BoolVarP(&checkFlag, "check", "c", false, "Check if the file(s) are formatted")
+	rootCmd.Flags().BoolVarP(&newlineFlag, "newline", "n", false, "End the file with a trailing newline")
+	rootCmd.Flags().UintVarP(&indentSize, "indent", "i", 4, "Number of spaces to use for indentation")
 }
 
 func Execute() {
@@ -83,55 +99,78 @@ type ParseState struct {
 	AllOriginalLines []string
 }
 
-/*
-*
-// Node is a structure used to represent a parse tree.
-//
-// In the node there are three fields, Value, Next, and Children. Value is the
-// current token's string value. Next is always the next non-child token, and
-// children contains all the children. Here's an example:
-//
-// (value next (child child-next child-next-next) next-next)
-//
+func (df *ParseState) processNode(ast *ExtendedNode) {
 
-	type Node struct {
-		Value       string          // actual content
-		Next        *Node           // the next item in the current sexp
-		Children    []*Node         // the children of this sexp
-		Heredocs    []Heredoc       // extra heredoc content attachments
-		Attributes  map[string]bool // special attributes for this node
-		Original    string          // original line used before parsing
-		Flags       []string        // only top Node should have this set
-		StartLine   int             // the line in the original dockerfile where the node begins
-		EndLine     int             // the line in the original dockerfile where the node ends
-		PrevComment []string
-	}
-*/
-func PrintAST(n *ExtendedNode, indent int) {
-	// Print out the AST
-
-	fmt.Printf("\n%sNode: %s\n", strings.Repeat("\t", indent), n.Node.Value)
-	fmt.Printf("%sOriginal: %s\n", strings.Repeat("\t", indent), n.Node.Original)
-	fmt.Printf("%sOriginalMultiline\n%s=====\n%s%s======\n", strings.Repeat("\t", indent), strings.Repeat("\t", indent), n.OriginalMultiline, strings.Repeat("\t", indent))
-	fmt.Printf("%sAttributes: %v\n", strings.Repeat("\t", indent), n.Node.Attributes)
-	fmt.Printf("%sHeredocs: %v\n", strings.Repeat("\t", indent), n.Node.Heredocs)
-	// n.PrevComment
-	fmt.Printf("%sPrevComment: %v\n", strings.Repeat("\t", indent), n.Node.PrevComment)
-	fmt.Printf("%sStartLine: %d\n", strings.Repeat("\t", indent), n.Node.StartLine)
-	fmt.Printf("%sEndLine: %d\n", strings.Repeat("\t", indent), n.Node.EndLine)
-	fmt.Printf("%sFlags: %v\n", strings.Repeat("\t", indent), n.Node.Flags)
-
-	if n.Children != nil {
-		fmt.Printf("\n%s!!!! Children\n%s==========\n", strings.Repeat("\t", indent), strings.Repeat("\t", indent))
-		for _, c := range n.Children {
-			PrintAST(c, indent+1)
-		}
-	}
-	if n.Next != nil {
-		fmt.Printf("\n%s!!!! Next\n%s==========\n", strings.Repeat("\t", indent), strings.Repeat("\t", indent))
-		PrintAST(n.Next, indent+1)
+	// We don't want to process nodes that don't have a start or end line.
+	if ast.Node.StartLine == 0 || ast.Node.EndLine == 0 {
+		return
 	}
 
+	// check if we are on the correct line,
+	// otherwise get the comments we are missing
+	if df.CurrentLine != ast.StartLine {
+		df.addLines(df.AllOriginalLines[df.CurrentLine : ast.StartLine-1])
+		df.CurrentLine = ast.StartLine
+	}
+
+	nodeName := strings.ToLower(ast.Node.Value)
+
+	dispatch := map[string]func(*ExtendedNode) string{
+		command.Add:         formatCopy,
+		command.Arg:         formatBasic,
+		command.Cmd:         formatCmd,
+		command.Copy:        formatCopy,
+		command.Entrypoint:  formatCmd,
+		command.Env:         formatEnv,
+		command.Expose:      formatBasic,
+		command.From:        formatBasic,
+		command.Healthcheck: formatBasic,
+		command.Label:       formatBasic, // TODO: order labels?
+		command.Maintainer:  formatMaintainer,
+		command.Onbuild:     formatBasic,
+		command.Run:         formatRun,
+		command.Shell:       formatCmd,
+		command.StopSignal:  formatBasic,
+		command.User:        formatBasic,
+		command.Volume:      formatBasic,
+		command.Workdir:     formatBasic,
+	}
+
+	fmtFunc := dispatch[nodeName]
+	if fmtFunc != nil {
+		// if df.Output != "" {
+		// 	// If the previous line isn't a comment or newline, add a newline
+		// 	lastTwoChars := df.Output[len(df.Output)-2 : len(df.Output)]
+		// 	lastNonTrailingNewline := strings.LastIndex(strings.TrimRight(df.Output, "\n"), "\n")
+		// 	if lastTwoChars != "\n\n" && df.Output[lastNonTrailingNewline+1] != '#' {
+		// 		df.Output += "\n"
+		// 	}
+		// }
+
+		df.Output += fmtFunc(ast)
+		df.CurrentLine = ast.EndLine
+		// fmt.Printf("CurrentLine: %d, %d\n", df.CurrentLine, ast.EndLine)
+		// return
+	}
+	// fmt.Printf("Unknown command: %s %s\n", nodeName, ast.OriginalMultiline)
+
+	for _, child := range ast.Children {
+		df.processNode(child)
+	}
+
+	// fmt.Printf("CurrentLine2: %d, %d\n", df.CurrentLine, ast.EndLine)
+
+	if ast.Node.Next != nil {
+		df.processNode(ast.Next)
+	}
+}
+
+func (df *ParseState) addLines(lines []string) {
+	missingContent := stripWhitespace(strings.Join(lines, ""), false)
+	// Replace multiple newlines with a single newline
+	re := regexp.MustCompile(`\n{2,}`)
+	missingContent = re.ReplaceAllString(missingContent, "\n")
+	df.Output += missingContent
 }
 
 func BuildParseStateFromFile(fileName string) (*ParseState, *ExtendedNode) {
@@ -146,18 +185,9 @@ func BuildParseStateFromFile(fileName string) (*ParseState, *ExtendedNode) {
 	f.Seek(0, io.SeekStart)
 	defer f.Close()
 	n := result.AST
-	scanner := bufio.NewScanner(f)
-	// optionally, resize scanner's capacity for lines over 64K, see next example
-	var fileLines []string
-	for scanner.Scan() {
-		// fmt.Printf("Line: %s\n", scanner.Text())
-		fileLines = append(fileLines, scanner.Text()+"\n")
-	}
-	// fmt.Printf("File lines: %d\n", len(fileLines))
-
-	if err := scanner.Err(); err != nil {
-		log.Fatal(err)
-	}
+	b := new(strings.Builder)
+	io.Copy(b, f)
+	fileLines := strings.SplitAfter(b.String(), "\n")
 
 	parseState := &ParseState{
 		CurrentLine:      0,
@@ -219,15 +249,14 @@ func BuildExtendedNode(n *parser.Node, fileLines []string) *ExtendedNode {
 
 func formatEnv(n *ExtendedNode) string {
 	// Only the legacy format will have a empty 3rd child
-	PrintAST(n, 0)
 	if n.Next.Next.Next.Value == "" {
 		return strings.ToUpper(n.Node.Value) + " " + n.Next.Node.Value + "=" + n.Next.Next.Node.Value + "\n"
 	}
 	// Otherwise, we have a valid env command
 	content := stripWhitespace(regexp.MustCompile(" ").Split(n.OriginalMultiline, 2)[1], true)
-	// Indent all lines with 4 spaces
+	// Indent all lines with indentSize spaces
 	re := regexp.MustCompile("(?m)^ *")
-	content = strings.Trim(re.ReplaceAllString(content, strings.Repeat(" ", 4)), " ")
+	content = strings.Trim(re.ReplaceAllString(content, strings.Repeat(" ", int(indentSize))), " ")
 	return strings.ToUpper(n.Value) + " " + content
 }
 
@@ -239,12 +268,17 @@ func formatBash(s string) string {
 		panic(err)
 	}
 	buf := new(bytes.Buffer)
-	syntax.NewPrinter(syntax.Minify(false), syntax.SingleLine(false), syntax.Indent(4), syntax.BinaryNextLine(true)).Print(buf, f)
+	syntax.NewPrinter(
+		syntax.Minify(false),
+		syntax.SingleLine(false),
+		syntax.Indent(indentSize),
+		syntax.BinaryNextLine(true),
+	).Print(buf, f)
 	return buf.String()
 }
+
 func formatRun(n *ExtendedNode) string {
 	// Get the original RUN command text
-
 	hereDoc := false
 	flags := n.Node.Flags
 
@@ -286,7 +320,7 @@ func formatRun(n *ExtendedNode) string {
 		if !hereDoc {
 			// Recover comments $( #...)
 			content = regexp.MustCompile(`\$\(\s+(#[\w\W]*?)\s+\) \\`).ReplaceAllString(content, "$1")
-			content = regexp.MustCompile(" *(#.*)").ReplaceAllString(content, strings.Repeat(" ", 4)+"$1")
+			content = regexp.MustCompile(" *(#.*)").ReplaceAllString(content, strings.Repeat(" ", int(indentSize))+"$1")
 		}
 
 		if hereDoc {
@@ -324,10 +358,36 @@ func stripWhitespace(lines string, rightOnly bool) string {
 	return strippedLines
 }
 
-func formatNoop(n *ExtendedNode) string {
-	// noop function that simply uppercases the command
+func formatBasic(n *ExtendedNode) string {
+	// Uppercases the command, and indent the following lines
 	parts := regexp.MustCompile(" ").Split(n.OriginalMultiline, 2)
-	return strings.ToUpper(n.Value) + " " + parts[1]
+	return indentFollowingLines(strings.ToUpper(n.Value) + " " + parts[1])
+}
+
+func indentFollowingLines(lines string) string {
+	// Split the input by lines
+	allLines := strings.SplitAfter(lines, "\n")
+
+	// If there's only one line or no lines, return the original
+	if len(allLines) <= 1 {
+		return lines
+	}
+
+	// Keep the first line as is
+	result := allLines[0]
+	// Indent all subsequent lines
+	for i := 1; i < len(allLines); i++ {
+		if allLines[i] != "" { // Skip empty lines
+			// Remove existing indentation and add new indentation
+			trimmedLine := strings.TrimLeft(allLines[i], " \t")
+			allLines[i] = strings.Repeat(" ", int(indentSize)) + trimmedLine
+		}
+
+		// Add to result (with newline except for the last line)
+		result += allLines[i]
+	}
+
+	return result
 }
 
 func getCmd(n *ExtendedNode) []string {
@@ -366,75 +426,39 @@ func formatMaintainer(n *ExtendedNode) string {
 	return "LABEL org.opencontainers.image.authors=\"" + maintainer + "\"\n"
 }
 
-func (df *ParseState) addLines(lines []string) {
-	missingContent := stripWhitespace(strings.Join(lines, ""), false)
-	// Replace multiple newlines with a single newline
-	re := regexp.MustCompile(`\n{2,}`)
-	missingContent = re.ReplaceAllString(missingContent, "\n")
-	df.Output += missingContent
-}
-func (df *ParseState) processNode(ast *ExtendedNode) {
+/*
+*
+// Node is a structure used to represent a parse tree.
+//
+// In the node there are three fields, Value, Next, and Children. Value is the
+// current token's string value. Next is always the next non-child token, and
+// children contains all the children. Here's an example:
+//
+// (value next (child child-next child-next-next) next-next)
+//
+*/
+func printAST(n *ExtendedNode, indent int) {
 
-	// We don't want to process nodes that don't have a start or end line.
-	if ast.Node.StartLine == 0 || ast.Node.EndLine == 0 {
-		return
+	fmt.Printf("\n%sNode: %s\n", strings.Repeat("\t", indent), n.Node.Value)
+	fmt.Printf("%sOriginal: %s\n", strings.Repeat("\t", indent), n.Node.Original)
+	fmt.Printf("%sOriginalMultiline\n%s=====\n%s%s======\n", strings.Repeat("\t", indent), strings.Repeat("\t", indent), n.OriginalMultiline, strings.Repeat("\t", indent))
+	fmt.Printf("%sAttributes: %v\n", strings.Repeat("\t", indent), n.Node.Attributes)
+	fmt.Printf("%sHeredocs: %v\n", strings.Repeat("\t", indent), n.Node.Heredocs)
+	// n.PrevComment
+	fmt.Printf("%sPrevComment: %v\n", strings.Repeat("\t", indent), n.Node.PrevComment)
+	fmt.Printf("%sStartLine: %d\n", strings.Repeat("\t", indent), n.Node.StartLine)
+	fmt.Printf("%sEndLine: %d\n", strings.Repeat("\t", indent), n.Node.EndLine)
+	fmt.Printf("%sFlags: %v\n", strings.Repeat("\t", indent), n.Node.Flags)
+
+	if n.Children != nil {
+		fmt.Printf("\n%s!!!! Children\n%s==========\n", strings.Repeat("\t", indent), strings.Repeat("\t", indent))
+		for _, c := range n.Children {
+			printAST(c, indent+1)
+		}
+	}
+	if n.Next != nil {
+		fmt.Printf("\n%s!!!! Next\n%s==========\n", strings.Repeat("\t", indent), strings.Repeat("\t", indent))
+		printAST(n.Next, indent+1)
 	}
 
-	// check if we are on the correct line,
-	// otherwise get the comments we are missing
-	if df.CurrentLine != ast.StartLine {
-		df.addLines(df.AllOriginalLines[df.CurrentLine : ast.StartLine-1])
-		df.CurrentLine = ast.StartLine
-	}
-
-	nodeName := strings.ToLower(ast.Node.Value)
-
-	dispatch := map[string]func(*ExtendedNode) string{
-		command.Add:         formatCopy,
-		command.Arg:         formatNoop,
-		command.Cmd:         formatCmd,
-		command.Copy:        formatCopy,
-		command.Entrypoint:  formatCmd,
-		command.Env:         formatEnv,
-		command.Expose:      formatNoop,
-		command.From:        formatNoop,
-		command.Healthcheck: formatNoop,
-		command.Label:       formatNoop, // TODO: order labels
-		command.Maintainer:  formatMaintainer,
-		command.Onbuild:     formatNoop,
-		command.Run:         formatRun,
-		command.Shell:       formatNoop,
-		command.StopSignal:  formatNoop,
-		command.User:        formatNoop,
-		command.Volume:      formatNoop,
-		command.Workdir:     formatNoop,
-	}
-
-	fmtFunc := dispatch[nodeName]
-	if fmtFunc != nil {
-		// if df.Output != "" {
-		// 	// If the previous line isn't a comment or newline, add a newline
-		// 	lastTwoChars := df.Output[len(df.Output)-2 : len(df.Output)]
-		// 	lastNonTrailingNewline := strings.LastIndex(strings.TrimRight(df.Output, "\n"), "\n")
-		// 	if lastTwoChars != "\n\n" && df.Output[lastNonTrailingNewline+1] != '#' {
-		// 		df.Output += "\n"
-		// 	}
-		// }
-
-		df.Output += fmtFunc(ast)
-		df.CurrentLine = ast.EndLine
-		// fmt.Printf("CurrentLine: %d, %d\n", df.CurrentLine, ast.EndLine)
-		// return
-	}
-	// fmt.Printf("Unknown command: %s %s\n", nodeName, ast.OriginalMultiline)
-
-	for _, child := range ast.Children {
-		df.processNode(child)
-	}
-
-	// fmt.Printf("CurrentLine2: %d, %d\n", df.CurrentLine, ast.EndLine)
-
-	if ast.Node.Next != nil {
-		df.processNode(ast.Next)
-	}
 }

@@ -1,6 +1,6 @@
 # dockerfmt
 
-Dockerfile format and parser, and a modern version [dockfmt](https://github.com/jessfraz/dockfmt). Built on top of the internal [buildkit](github.com/moby/buildkit) parser.
+Dockerfile format and parser, and a modern version of [dockfmt](https://github.com/jessfraz/dockfmt). Built on top of the internal [buildkit](github.com/moby/buildkit) parser.
 
 ## Usage
 
