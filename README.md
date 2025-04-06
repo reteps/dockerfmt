@@ -4,10 +4,26 @@ Dockerfile format and parser, and a modern version of [dockfmt](https://github.c
 
 ## Usage
 
-```bash
-dockerfmt version
-dockerfmt --check <file1> <file2> ...
-dockerfmt <file1> <file2> ...
+```output
+A updated version of the dockfmt. Uses the dockerfile parser from moby/buildkit and the shell formatter from mvdan/sh.
+
+Usage:
+  dockerfmt [Dockerfile] [flags]
+  dockerfmt [command]
+
+Available Commands:
+  completion  Generate the autocompletion script for the specified shell
+  help        Help about any command
+  version     Print the version number of dockerfmt
+
+Flags:
+  -c, --check         Check if the file(s) are formatted
+  -h, --help          help for dockerfmt
+  -i, --indent uint   Number of spaces to use for indentation (default 4)
+  -n, --newline       End the file with a trailing newline
+  -w, --write         Write the formatted output back to the file(s)
+
+Use "dockerfmt [command] --help" for more information about a command.
 ```
 
 ## Features
