@@ -20,7 +20,7 @@ import (
 var rootCmd = &cobra.Command{
 	Use:   "dockerfmt [Dockerfile]",
 	Short: "dockerfmt is a Dockerfile and RUN step formatter.",
-	Long:  `A updated version of the excellent dockfmt. Uses the dockerfile parser from moby/buildkit and the shell formatter from mvdan/sh`,
+	Long:  `A updated version of the dockfmt. Uses the dockerfile parser from moby/buildkit and the shell formatter from mvdan/sh`,
 	Run:   Run,
 	Args:  cobra.ExactArgs(1),
 }
@@ -219,11 +219,16 @@ func BuildExtendedNode(n *parser.Node, fileLines []string) *ExtendedNode {
 
 func formatEnv(n *ExtendedNode) string {
 	// Only the legacy format will have a empty 3rd child
+	PrintAST(n, 0)
 	if n.Next.Next.Next.Value == "" {
-		return strings.ToUpper(n.Node.Value) + " " + n.Next.Node.Value + "=" + n.Next.Next.Node.Value
+		return strings.ToUpper(n.Node.Value) + " " + n.Next.Node.Value + "=" + n.Next.Next.Node.Value + "\n"
 	}
 	// Otherwise, we have a valid env command
-	return formatNoop(n)
+	content := stripWhitespace(regexp.MustCompile(" ").Split(n.OriginalMultiline, 2)[1], true)
+	// Indent all lines with 4 spaces
+	re := regexp.MustCompile("(?m)^ *")
+	content = strings.Trim(re.ReplaceAllString(content, strings.Repeat(" ", 4)), " ")
+	return strings.ToUpper(n.Value) + " " + content
 }
 
 func formatBash(s string) string {
@@ -256,26 +261,37 @@ func formatRun(n *ExtendedNode) string {
 		parts := regexp.MustCompile("[ \t]").Split(n.OriginalMultiline, 2+len(flags))
 		content = parts[1+len(flags)]
 	}
+	// Try to parse as JSON
+	var jsonItems []string
+	err := json.Unmarshal([]byte(content), &jsonItems)
+	if err == nil {
+		out, err := json.Marshal(jsonItems)
+		if err != nil {
+			panic(err)
+		}
+		outStr := strings.ReplaceAll(string(out), "\",\"", "\", \"")
+		content = outStr + "\n"
+	} else {
+		if !hereDoc {
+			// Replace line continuations with comments to use bash comment style
+			re := regexp.MustCompile(`(\\\s*\n\s*)(#.*)`)
+			content = re.ReplaceAllString(content, "$1`$2` \\")
 
-	if !hereDoc {
-		// Replace line continuations with comments to use bash comment style
-		re := regexp.MustCompile(`(\\\s*\n\s*)(#.*)`)
-		content = re.ReplaceAllString(content, "$1`$2` \\")
+			// Remove whitespace at the end of lines
+			content = stripWhitespace(content, true)
+		}
 
-		// Remove whitespace at the end of lines
-		content = stripWhitespace(content, true)
-	}
+		// Now that we have a valid bash-style command, we can format it with shfmt
+		content = formatBash(content)
 
-	// Now that we have a valid bash-style command, we can format it with shfmt
-	content = formatBash(content)
+		if !hereDoc {
+			// Recover original dockerfile-style comments
+			content = regexp.MustCompile(" *`(#.*)`..").ReplaceAllString(content, strings.Repeat(" ", 4)+"$1")
+		}
 
-	if !hereDoc {
-		// Recover original dockerfile-style comments
-		content = regexp.MustCompile(" *`(#.*)`..").ReplaceAllString(content, strings.Repeat(" ", 4)+"$1")
-	}
-
-	if hereDoc {
-		content = "<<" + n.Node.Heredocs[0].Name + "\n" + content + n.Node.Heredocs[0].Name
+		if hereDoc {
+			content = "<<" + n.Node.Heredocs[0].Name + "\n" + content + n.Node.Heredocs[0].Name
+		}
 	}
 
 	if len(flags) > 0 {

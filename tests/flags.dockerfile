@@ -1,3 +1,4 @@
+# https://github.com/jessfraz/dockfmt/issues/23
 FROM --platform=linux/arm64 debian
 
 RUN --network=host apt-get install vim
