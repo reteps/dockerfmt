@@ -214,7 +214,8 @@ func formatRun(n *ExtendedNode, c *Config) string {
 		// TODO: check if doc.FileDescriptor == 0?
 	} else {
 		// We split the original multiline string by whitespace
-		parts := regexp.MustCompile("[ \t]").Split(n.OriginalMultiline, 2+len(flags))
+		originalTrimmed := strings.TrimLeft(n.OriginalMultiline, " \t")
+		parts := regexp.MustCompile("[ \t]").Split(originalTrimmed, 2+len(flags))
 		content = parts[1+len(flags)]
 	}
 	// Try to parse as JSON
@@ -259,7 +260,9 @@ func formatRun(n *ExtendedNode, c *Config) string {
 
 func formatBasic(n *ExtendedNode, c *Config) string {
 	// Uppercases the command, and indent the following lines
-	parts := regexp.MustCompile(" ").Split(n.OriginalMultiline, 2)
+	originalTrimmed := strings.TrimLeft(n.OriginalMultiline, " \t")
+
+	parts := regexp.MustCompile(" ").Split(originalTrimmed, 2)
 	return IndentFollowingLines(strings.ToUpper(n.Value)+" "+parts[1], c.IndentSize)
 }
 
