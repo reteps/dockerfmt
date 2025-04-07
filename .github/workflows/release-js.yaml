@@ -1,10 +1,7 @@
 name: Publish Package to npmjs
 on:
-  push:
-    branches:
-      - main
-#   release:
-#     types: [created]
+  release:
+    types: [created]
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -13,10 +10,9 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
-      # Setup .npmrc file to publish to npm
 
-      #   - name: Install tinygo
-        # Until 0.38.0 release, I won't rebuild the tinygo binary
+      # - name: Install tinygo
+      # Until 0.38.0 release, I won't rebuild the tinygo binary
       - uses: actions/setup-node@v4
         with:
           node-version: '20.x'
@@ -24,6 +20,7 @@ jobs:
       - run: |
           cd js
           npm ci
+          npm run build-js
           npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
