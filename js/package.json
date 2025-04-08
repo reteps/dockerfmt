@@ -6,7 +6,7 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "//": "Requires tinygo 0.38.0 or later",
     "build-go": "tinygo build -o format.wasm -target wasm --no-debug",
-    "build-js": "tsc && cp format.wasm wasm_exec.cjs dist",
+    "build-js": "tsc && cp format.wasm wasm_exec.js dist",
     "build": "npm run build-go && npm run build-js"
   },
   "files": [
