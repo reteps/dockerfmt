@@ -220,7 +220,7 @@ func formatShell(content string, hereDoc bool, c *Config) string {
 		content = StripWhitespace(content, true)
 		// log.Printf("Content0: %s\n", content)
 		re := regexp.MustCompile(`(\\\n\s+)((?:\s*#.*){1,})`)
-		content = re.ReplaceAllString(content, `; $1$( $2`+"\n"+`) \`)
+		content = re.ReplaceAllString(content, `'dummynode';$1$( $2`+"\n"+`)\`)
 	}
 
 	// Now that we have a valid bash-style command, we can format it with shfmt
@@ -231,8 +231,10 @@ func formatShell(content string, hereDoc bool, c *Config) string {
 	if !hereDoc {
 		content = regexp.MustCompile(`\$\(\s+(#[\w\W]*?)\s+\) \\`).ReplaceAllString(content, "$1")
 		// log.Printf("Content3: %s\n", content)
-		// If the character before the comment is && or ||, we need to place it on a new line
-		content = regexp.MustCompile(`(&&|\|\|)(\s*)(#.*)\n\s+(.*)`).ReplaceAllString(content, "$1$2$4\n $3")
+		content = strings.ReplaceAll(content, "'dummynode' ", "")
+		content = strings.ReplaceAll(content, "'dummynode'", "")
+		content = regexp.MustCompile(`(\s*#.*)`).ReplaceAllString(content, "$1")
+		// log.Printf("Content4: %s\n", content)
 		content = regexp.MustCompile("(?m)^ *(#.*)").ReplaceAllString(content, strings.Repeat(" ", int(c.IndentSize))+"$1")
 
 		// Add backslashes if needed
@@ -242,7 +244,7 @@ func formatShell(content string, hereDoc bool, c *Config) string {
 			if len(line) > 0 && line[len(line)-2] != '\\' && line[len(line)-1] == '\n' {
 				// Check if the next line is empty and if the current line is not a comment
 				if i+1 < len(lines) && strings.TrimSpace(lines[i+1]) != "" && strings.TrimSpace(line)[0] != '#' {
-					line = line[:len(line)-1] + " \\\n"
+					line = strings.TrimRight(line, " \n") + " \\\n"
 				}
 			}
 			lines[i] = line
