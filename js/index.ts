@@ -10,7 +10,9 @@ import {
 const getWasm = () => {
     return fs.readFile(
         path.resolve(
-            path.dirname(fileURLToPath(import.meta.url)),
+            typeof __dirname === 'undefined'
+                ? path.dirname(fileURLToPath(import.meta.url))
+                : __dirname,
             'format.wasm',
         ),
     )
@@ -32,4 +34,4 @@ export const formatDockerfile = async (
     return formatDockerfileContents(fileContents, options)
 }
 
-export { FormatOptions }
+export type { FormatOptions }
