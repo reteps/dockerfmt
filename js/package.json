@@ -21,7 +21,7 @@
       "browser": "./dist/format.js",
       "default": "./dist/node.js"
     },
-    "./format.wam": "./dist/format.wasm",
+    "./format.wasm": "./dist/format.wasm",
     "./wasm_exec": "./dist/wasm_exec.js",
     "./wasm_exec.js": "./dist/wasm_exec.js"
   },

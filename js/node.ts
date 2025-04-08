@@ -13,7 +13,6 @@ export const formatDockerfileContents = async (fileContents: string, options: Fo
 }
 
 export const formatDockerfile = async (fileName: string, options: FormatOptions) => {
-  // This would only work in Node.js, so we don't add a wasmDownload function
   const fileBuffer = await fs.readFile(fileName);
   const fileContents = fileBuffer.toString();
   return formatDockerfileContents(fileContents, options);
