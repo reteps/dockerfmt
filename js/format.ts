@@ -3,7 +3,7 @@ import './wasm_exec.cjs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 
-interface FormatOptions {
+export interface FormatOptions {
     indent: number;
     trailingNewline: boolean;
 }
