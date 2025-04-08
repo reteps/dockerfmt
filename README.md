@@ -30,6 +30,14 @@ Flags:
 Use "dockerfmt [command] --help" for more information about a command.
 ```
 
+## Limitations
+
+- The `RUN` parser currently doesn't support grouping or semicolons in commands
+- No line wrapping is performed for long JSON commands
+- The `# escape=X` directive is not supported
+
+Contributions are welcome!
+
 ## Features
 
 - Format `RUN` steps with <https://github.com/mvdan/sh>
@@ -59,9 +67,6 @@ RUN echo "hello" \
 
 This is surprisingly [non-trivial](https://github.com/moby/buildkit/issues/5889) as we want to attach the comments to their position in the formatted output, but they are stripped by the parser beforehand.
 
-## Caveats
-
-The `RUN` parser currently doesn't support grouping or semicolons in commands. Contributions are welcome!
 
 ## JS Bindings
 

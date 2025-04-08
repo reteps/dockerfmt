@@ -35,6 +35,37 @@ type Config struct {
 	TrailingNewline bool
 }
 
+func FormatNode(ast *ExtendedNode, c *Config) (string, bool) {
+	nodeName := strings.ToLower(ast.Node.Value)
+	dispatch := map[string]func(*ExtendedNode, *Config) string{
+		command.Add:         formatSpaceSeparated,
+		command.Arg:         formatBasic,
+		command.Cmd:         formatCmd,
+		command.Copy:        formatSpaceSeparated,
+		command.Entrypoint:  formatCmd,
+		command.Env:         formatEnv,
+		command.Expose:      formatSpaceSeparated,
+		command.From:        formatSpaceSeparated,
+		command.Healthcheck: formatBasic,
+		command.Label:       formatBasic, // TODO: order labels?
+		command.Maintainer:  formatMaintainer,
+		command.Onbuild:     FormatOnBuild,
+		command.Run:         formatRun,
+		command.Shell:       formatCmd,
+		command.StopSignal:  formatBasic,
+		command.User:        formatBasic,
+		command.Volume:      formatBasic,
+		command.Workdir:     formatSpaceSeparated,
+	}
+
+	fmtFunc := dispatch[nodeName]
+	if fmtFunc == nil {
+		return "", false
+		// log.Fatalf("Unknown command: %s %s\n", nodeName, ast.OriginalMultiline)
+	}
+	return fmtFunc(ast, c), true
+}
+
 func (df *ParseState) processNode(ast *ExtendedNode) {
 
 	// We don't want to process nodes that don't have a start or end line.
@@ -48,45 +79,21 @@ func (df *ParseState) processNode(ast *ExtendedNode) {
 		df.Output += FormatComments(df.AllOriginalLines[df.CurrentLine : ast.StartLine-1])
 		df.CurrentLine = ast.StartLine
 	}
+	// if df.Output != "" {
+	// 	// If the previous line isn't a comment or newline, add a newline
+	// 	lastTwoChars := df.Output[len(df.Output)-2 : len(df.Output)]
+	// 	lastNonTrailingNewline := strings.LastIndex(strings.TrimRight(df.Output, "\n"), "\n")
+	// 	if lastTwoChars != "\n\n" && df.Output[lastNonTrailingNewline+1] != '#' {
+	// 		df.Output += "\n"
+	// 	}
+	// }
 
-	nodeName := strings.ToLower(ast.Node.Value)
-
-	dispatch := map[string]func(*ExtendedNode, *Config) string{
-		command.Add:         formatCopy,
-		command.Arg:         formatBasic,
-		command.Cmd:         formatCmd,
-		command.Copy:        formatCopy,
-		command.Entrypoint:  formatCmd,
-		command.Env:         formatEnv,
-		command.Expose:      formatBasic,
-		command.From:        formatBasic,
-		command.Healthcheck: formatBasic,
-		command.Label:       formatBasic, // TODO: order labels?
-		command.Maintainer:  formatMaintainer,
-		command.Onbuild:     formatBasic,
-		command.Run:         formatRun,
-		command.Shell:       formatCmd,
-		command.StopSignal:  formatBasic,
-		command.User:        formatBasic,
-		command.Volume:      formatBasic,
-		command.Workdir:     formatBasic,
-	}
-
-	fmtFunc := dispatch[nodeName]
-	if fmtFunc != nil {
-		// if df.Output != "" {
-		// 	// If the previous line isn't a comment or newline, add a newline
-		// 	lastTwoChars := df.Output[len(df.Output)-2 : len(df.Output)]
-		// 	lastNonTrailingNewline := strings.LastIndex(strings.TrimRight(df.Output, "\n"), "\n")
-		// 	if lastTwoChars != "\n\n" && df.Output[lastNonTrailingNewline+1] != '#' {
-		// 		df.Output += "\n"
-		// 	}
-		// }
-
-		df.Output += fmtFunc(ast, df.Config)
+	output, ok := FormatNode(ast, df.Config)
+	if ok {
+		df.Output += output
 		df.CurrentLine = ast.EndLine
-		// fmt.Printf("CurrentLine: %d, %d\n", df.CurrentLine, ast.EndLine)
 	}
+	// fmt.Printf("CurrentLine: %d, %d\n", df.CurrentLine, ast.EndLine)
 	// fmt.Printf("Unknown command: %s %s\n", nodeName, ast.OriginalMultiline)
 
 	for _, child := range ast.Children {
@@ -98,6 +105,18 @@ func (df *ParseState) processNode(ast *ExtendedNode) {
 	if ast.Node.Next != nil {
 		df.processNode(ast.Next)
 	}
+}
+
+func FormatOnBuild(n *ExtendedNode, c *Config) string {
+	if len(n.Node.Next.Children) == 1 {
+		// fmt.Printf("Onbuild: %s\n", n.Node.Next.Children[0].Value)
+		output, ok := FormatNode(n.Next.Children[0], c)
+		if ok {
+			return strings.ToUpper(n.Node.Value) + " " + output
+		}
+	}
+
+	return n.OriginalMultiline
 }
 
 func FormatFileLines(fileLines []string, indentSize uint, trailingNewline bool) string {
@@ -205,10 +224,11 @@ func formatEnv(n *ExtendedNode, c *Config) string {
 func formatShell(content string, hereDoc bool, c *Config) string {
 	// Semicolons require special handling so we don't break the command
 	// TODO: support semicolons in commands
-	if strings.Contains(content, ";") {
+
+	// check for [^\;]
+	if regexp.MustCompile(`[^\\];`).MatchString(content) {
 		return content
 	}
-
 	// Grouped expressions aren't formatted well
 	// See: https://github.com/mvdan/sh/issues/1148
 	if strings.Contains(content, "{ \\") {
@@ -269,7 +289,13 @@ func formatRun(n *ExtendedNode, c *Config) string {
 		// TODO: check if doc.FileDescriptor == 0?
 	} else {
 		// We split the original multiline string by whitespace
-		originalTrimmed := strings.TrimLeft(n.OriginalMultiline, " \t")
+		originalText := n.OriginalMultiline
+		if n.OriginalMultiline == "" {
+			// If the original multiline string is empty, use the original value
+			originalText = n.Node.Original
+		}
+
+		originalTrimmed := strings.TrimLeft(originalText, " \t")
 		parts := regexp.MustCompile("[ \t]").Split(originalTrimmed, 2+len(flags))
 		content = parts[1+len(flags)]
 	}
@@ -331,7 +357,7 @@ func formatCmd(n *ExtendedNode, c *Config) string {
 	return strings.ToUpper(n.Value) + " " + string(bWithSpace) + "\n"
 }
 
-func formatCopy(n *ExtendedNode, c *Config) string {
+func formatSpaceSeparated(n *ExtendedNode, c *Config) string {
 	cmd := strings.Join(getCmd(n.Next), " ")
 	if len(n.Node.Flags) > 0 {
 		cmd = strings.Join(n.Node.Flags, " ") + " " + cmd
