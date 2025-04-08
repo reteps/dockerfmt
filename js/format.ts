@@ -1,26 +1,30 @@
-import './wasm_exec.js';
+import './wasm_exec.js'
 
 export interface FormatOptions {
-    indent: number;
-    trailingNewline: boolean;
+    indent: number
+    trailingNewline: boolean
 }
 
-export const formatDockerfileContents = async (fileContents: string, options: FormatOptions, getWasm: () => Promise<Buffer>) => {
-    const go = new Go()  // Defined in wasm_exec.js
+export const formatDockerfileContents = async (
+    fileContents: string,
+    options: FormatOptions,
+    getWasm: () => Promise<Buffer>,
+) => {
+    const go = new Go() // Defined in wasm_exec.js
     const encoder = new TextEncoder()
     const decoder = new TextDecoder()
 
     // get current working directory
-    const wasmBuffer = await getWasm();
-    const wasm = await WebAssembly.instantiate(wasmBuffer, go.importObject);
-    
+    const wasmBuffer = await getWasm()
+    const wasm = await WebAssembly.instantiate(wasmBuffer, go.importObject)
+
     /**
      * Do not await this promise, because it only resolves once the go main()
      * function has exited. But we need the main function to stay alive to be
      * able to call the `parse` and `print` function.
-    */
+     */
     go.run(wasm.instance)
-   
+
     const { memory, malloc, free, formatBytes } = wasm.instance.exports as {
         memory: WebAssembly.Memory
         malloc: (size: number) => number
@@ -29,11 +33,9 @@ export const formatDockerfileContents = async (fileContents: string, options: Fo
             pointer: number,
             length: number,
             indent: number,
-            trailingNewline: boolean
+            trailingNewline: boolean,
         ) => number
-      }
-
-
+    }
 
     const fileBufferBytes = encoder.encode(fileContents)
     const filePointer = malloc(fileBufferBytes.byteLength)
@@ -41,7 +43,12 @@ export const formatDockerfileContents = async (fileContents: string, options: Fo
     new Uint8Array(memory.buffer).set(fileBufferBytes, filePointer)
 
     // Call formatBytes function from WebAssembly
-    const resultPointer = formatBytes(filePointer, fileBufferBytes.byteLength, options.indent, options.trailingNewline)
+    const resultPointer = formatBytes(
+        filePointer,
+        fileBufferBytes.byteLength,
+        options.indent,
+        options.trailingNewline,
+    )
 
     // Decode the result
     const resultBytes = new Uint8Array(memory.buffer).subarray(resultPointer)
@@ -53,5 +60,7 @@ export const formatDockerfileContents = async (fileContents: string, options: Fo
 }
 
 export const formatDockerfile = () => {
-    throw new Error('`formatDockerfile` is not implemented in the browser. Use `formatDockerfileContents` instead.');
+    throw new Error(
+        '`formatDockerfile` is not implemented in the browser. Use `formatDockerfileContents` instead.',
+    )
 }
