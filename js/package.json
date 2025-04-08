@@ -12,8 +12,19 @@
   "files": [
     "dist"
   ],
-  "main": "dist/format.js",
-  "types": "dist/format.d.ts",
+  "browser": "dist/format.js",
+  "main": "dist/node.js",
+  "types": "dist/node.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/node.d.ts",
+      "browser": "./dist/format.js",
+      "default": "./dist/node.js"
+    },
+    "./format.wam": "./dist/format.wasm",
+    "./wasm_exec": "./dist/wasm_exec.js",
+    "./wasm_exec.js": "./dist/wasm_exec.js"
+  },
   "author": "Peter Stenger <pete@stenger.io>",
   "repository": "git+https://github.com/reteps/dockerfmt/tree/main/js",
   "license": "MIT",
