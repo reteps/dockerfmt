@@ -1,3 +1,14 @@
 {
-  "singleQuote": true
+  "plugins": ["prettier-plugin-pkg"],
+  "singleQuote": true,
+  "semi": false,
+  "tabWidth": 4,
+  "overrides": [
+    {
+      "files": "*.json",
+      "options": {
+        "tabWidth": 2
+      }
+    }
+  ]
 }
