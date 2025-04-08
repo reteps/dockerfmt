@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"regexp"
 	"strings"
@@ -105,7 +106,8 @@ func FormatFileLines(fileLines []string, indentSize uint, trailingNewline bool) 
 	// and not as a struct.
 	result, err := parser.Parse(strings.NewReader(strings.Join(fileLines, "")))
 	if err != nil {
-		panic(err)
+		log.Printf("%s\n", strings.Join(fileLines, ""))
+		log.Fatalf("Error parsing file: %v", err)
 	}
 
 	parseState := &ParseState{
@@ -192,13 +194,49 @@ func formatEnv(n *ExtendedNode, c *Config) string {
 		return strings.ToUpper(n.Node.Value) + " " + n.Next.Node.Value + "=" + n.Next.Next.Node.Value + "\n"
 	}
 	// Otherwise, we have a valid env command
-	content := StripWhitespace(regexp.MustCompile(" ").Split(n.OriginalMultiline, 2)[1], true)
+	originalTrimmed := strings.TrimLeft(n.OriginalMultiline, " \t")
+	content := StripWhitespace(regexp.MustCompile(" ").Split(originalTrimmed, 2)[1], true)
 	// Indent all lines with indentSize spaces
 	re := regexp.MustCompile("(?m)^ *")
 	content = strings.Trim(re.ReplaceAllString(content, strings.Repeat(" ", int(c.IndentSize))), " ")
 	return strings.ToUpper(n.Value) + " " + content
 }
 
+func formatShell(content string, hereDoc bool, c *Config) string {
+	// Semicolons require special handling so we don't break the command
+	// TODO: support semicolons in commands
+	if strings.Contains(content, ";") {
+		return content
+	}
+
+	// Grouped expressions aren't formatted well
+	// See: https://github.com/mvdan/sh/issues/1148
+	if strings.Contains(content, "{ \\") {
+		return content
+	}
+
+	if !hereDoc {
+		// Replace comments with a subshell evaluation -- they won't be run so we can do this.
+		content = StripWhitespace(content, true)
+		// log.Printf("Content0: %s\n", content)
+		re := regexp.MustCompile(`(\\\n\s+)((?:\s*#.*){1,})`)
+		content = re.ReplaceAllString(content, `$1$( $2`+"\n"+`) \`)
+	}
+
+	// Now that we have a valid bash-style command, we can format it with shfmt
+	// log.Printf("Content1: %s\n", content)
+	content = formatBash(content, c.IndentSize)
+	// log.Printf("Content2: %s\n", content)
+
+	if !hereDoc {
+		content = regexp.MustCompile(`\$\(\s+(#[\w\W]*?)\s+\) \\`).ReplaceAllString(content, "$1")
+		// log.Printf("Content3: %s\n", content)
+		// If the character before the comment is && or ||, we need to place it on a new line
+		content = regexp.MustCompile(`(&&|\|\|)(\s*)(#.*)\n\s+(.*)`).ReplaceAllString(content, "$1$2$4\n $3")
+		content = regexp.MustCompile("(?m)^ *(#.*)").ReplaceAllString(content, strings.Repeat(" ", int(c.IndentSize))+"$1")
+	}
+	return content
+}
 func formatRun(n *ExtendedNode, c *Config) string {
 	// Get the original RUN command text
 	hereDoc := false
@@ -229,23 +267,7 @@ func formatRun(n *ExtendedNode, c *Config) string {
 		outStr := strings.ReplaceAll(string(out), "\",\"", "\", \"")
 		content = outStr + "\n"
 	} else {
-		if !hereDoc {
-			// Replace comments with a subshell evaluation -- they won't be run so we can do this.
-			content = StripWhitespace(content, true)
-			re := regexp.MustCompile(`(\\\n\s+)((?:\s*#.*){1,})`)
-			content = re.ReplaceAllString(content, `$1$( $2`+"\n"+`) \`)
-			// log.Printf("Content: %s\n", content)
-		}
-
-		// Now that we have a valid bash-style command, we can format it with shfmt
-		content = formatBash(content, c.IndentSize)
-
-		if !hereDoc {
-			// Recover comments $( #...)
-			content = regexp.MustCompile(`\$\(\s+(#[\w\W]*?)\s+\) \\`).ReplaceAllString(content, "$1")
-			content = regexp.MustCompile(" *(#.*)").ReplaceAllString(content, strings.Repeat(" ", int(c.IndentSize))+"$1")
-		}
-
+		content = formatShell(content, hereDoc, c)
 		if hereDoc {
 			content = "<<" + n.Node.Heredocs[0].Name + "\n" + content + n.Node.Heredocs[0].Name
 		}
@@ -269,11 +291,16 @@ func formatBasic(n *ExtendedNode, c *Config) string {
 func getCmd(n *ExtendedNode) []string {
 	cmd := []string{}
 	for node := n; node != nil; node = node.Next {
-		cmd = append(cmd, node.Value)
+		// Split value by whitespace
+		parts := regexp.MustCompile("[ \t]+").Split(strings.Trim(node.Value, " \t"), -1)
+		// Remove empty parts
+
+		cmd = append(cmd, parts...)
 		if len(node.Flags) > 0 {
 			cmd = append(cmd, node.Flags...)
 		}
 	}
+	// log.Printf("getCmd: %v\n", cmd)
 	return cmd
 }
 
@@ -283,7 +310,8 @@ func formatCmd(n *ExtendedNode, c *Config) string {
 	if err != nil {
 		return ""
 	}
-	return strings.ToUpper(n.Value) + " " + string(b) + "\n"
+	bWithSpace := strings.ReplaceAll(string(b), "\",\"", "\", \"")
+	return strings.ToUpper(n.Value) + " " + string(bWithSpace) + "\n"
 }
 
 func formatCopy(n *ExtendedNode, c *Config) string {
@@ -320,23 +348,28 @@ func GetFileLines(fileName string) []string {
 
 func StripWhitespace(lines string, rightOnly bool) string {
 	// Split the string into lines by newlines
-	linesArray := strings.Split(lines, "\n")
+	// log.Printf("Lines: .%s.\n", lines)
+	linesArray := strings.SplitAfter(lines, "\n")
 	// Create a new slice to hold the stripped lines
 	var strippedLines string
 	// Iterate over each line
-	for i, line := range linesArray {
+	for _, line := range linesArray {
 		// Trim leading and trailing whitespace
+		// log.Printf("Line .%s.\n", line)
+		hadNewline := len(line) > 0 && line[len(line)-1] == '\n'
 		if rightOnly {
 			// Only trim trailing whitespace
-			line = strings.TrimRight(line, " \t")
+			line = strings.TrimRight(line, " \t\n")
 		} else {
 			// Trim both leading and trailing whitespace
-			line = strings.TrimSpace(line)
+			line = strings.Trim(line, " \t\n")
 		}
 
-		if line != "" || i != len(linesArray)-1 {
-			strippedLines += line + "\n"
+		// log.Printf("Line2 .%s.", line)
+		if hadNewline {
+			line += "\n"
 		}
+		strippedLines += line
 	}
 	return strippedLines
 }
@@ -347,7 +380,7 @@ func FormatComments(lines []string) string {
 	// we are adding comments and we don't care about the formatting.
 	missingContent := StripWhitespace(strings.Join(lines, ""), false)
 	// Replace multiple newlines with a single newline
-	re := regexp.MustCompile(`\n{2,}`)
+	re := regexp.MustCompile(`\n{3,}`)
 	return re.ReplaceAllString(missingContent, "\n")
 }
 
