@@ -1,6 +1,6 @@
 # `@reteps/dockerfmt`
 
-Bindings around the Golang `dockerfmt` tooling.
+Bindings around the Golang `dockerfmt` tooling. It uses [tinygo](https://github.com/tinygo-org/tinygo) to compile the Go code to WebAssembly, which is then used in the JS bindings.
 
 
 ```js
