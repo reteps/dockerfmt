@@ -7,7 +7,8 @@
     "//": "Requires tinygo 0.38.0 or later",
     "build-go": "tinygo build -o format.wasm -target wasm --no-debug",
     "build-js": "tsc && cp format.wasm wasm_exec.js dist",
-    "build": "npm run build-go && npm run build-js"
+    "build": "npm run build-go && npm run build-js",
+    "format": "prettier --write \"**/*.{js,ts,json}\""
   },
   "files": [
     "dist"
@@ -30,7 +31,8 @@
   "license": "MIT",
   "description": "",
   "devDependencies": {
-    "@types/node": "^22.14.0"
+    "@types/node": "^22.14.0",
+    "prettier": "^3.5.3"
   },
   "dependencies": {
     "typescript": "^5.8.3"
