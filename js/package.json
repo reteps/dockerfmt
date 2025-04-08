@@ -3,7 +3,6 @@
   "version": "0.2.5",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "//": "Requires tinygo 0.38.0 or later",
     "build-go": "tinygo build -o format.wasm -target wasm --no-debug",
     "build-js": "tsc && cp format.wasm wasm_exec.js dist",
@@ -30,9 +29,7 @@
   "license": "MIT",
   "description": "",
   "devDependencies": {
-    "@types/node": "^22.14.0"
-  },
-  "dependencies": {
+    "@types/node": "^22.14.0",
     "typescript": "^5.8.3"
   }
 }
