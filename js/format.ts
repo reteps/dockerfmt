@@ -9,18 +9,21 @@ interface FormatOptions {
 }
 
 const formatDockerfile = async (fileName: string, options: FormatOptions) => {
+    // This would only work in Node.js, so we don't add a wasmDownload function
     const fileBuffer = await fs.readFile(fileName);
     const fileContents = fileBuffer.toString();
     return formatDockerfileContents(fileContents, options);
 }
 
-const formatDockerfileContents = async (fileContents: string, options: FormatOptions) => {
+const getWasmModule = () => fs.readFile(path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'format.wasm'))
+
+const formatDockerfileContents = async (fileContents: string, options: FormatOptions, getWasm: () => Promise<Buffer> = getWasmModule) => {
     const go = new Go()  // Defined in wasm_exec.js
     const encoder = new TextEncoder()
     const decoder = new TextDecoder()
 
     // get current working directory
-    const wasmBuffer = await fs.readFile(path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'format.wasm'));
+    const wasmBuffer = await getWasm();
     const wasm = await WebAssembly.instantiate(wasmBuffer, go.importObject);
     
     /**
