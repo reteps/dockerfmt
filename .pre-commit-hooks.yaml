@@ -6,6 +6,7 @@
   args:
     - --write
     - --newline
+    - --indent
   description: Format Dockerfile files
   entry: dockerfmt
   files: ^.*Dockerfile.*$
