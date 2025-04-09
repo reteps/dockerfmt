@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -34,10 +33,10 @@ func TestFormatter(t *testing.T) {
 			formattedLines := lib.FormatFileLines(originalLines, c)
 
 			// Write outFile to directory
-			err = os.WriteFile(outFile, []byte(formattedLines), 0644)
-			if err != nil {
-				t.Fatalf("Failed to write to file %s: %v", outFile, err)
-			}
+			// err = os.WriteFile(outFile, []byte(formattedLines), 0644)
+			// if err != nil {
+			// 	t.Fatalf("Failed to write to file %s: %v", outFile, err)
+			// }
 
 			// Read outFile
 			outLines, err := lib.GetFileLines(outFile)
