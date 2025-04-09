@@ -3,6 +3,7 @@ module github.com/reteps/dockerfmt
 go 1.24.1
 
 require (
+	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/moby/buildkit v0.20.2
 	github.com/spf13/cobra v1.9.1
 	mvdan.cc/sh/v3 v3.11.0

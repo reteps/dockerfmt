@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/google/shlex"
 	"github.com/moby/buildkit/frontend/dockerfile/command"
 	"github.com/moby/buildkit/frontend/dockerfile/parser"
 	"mvdan.cc/sh/v3/syntax"
@@ -300,7 +301,7 @@ func formatRun(n *ExtendedNode, c *Config) string {
 	var jsonItems []string
 	err := json.Unmarshal([]byte(content), &jsonItems)
 	if err == nil {
-		out, err := json.Marshal(jsonItems)
+		out, err := Marshal(jsonItems)
 		if err != nil {
 			panic(err)
 		}
@@ -328,17 +329,34 @@ func formatBasic(n *ExtendedNode, c *Config) string {
 	return IndentFollowingLines(strings.ToUpper(n.Value)+" "+parts[1], c.IndentSize)
 }
 
+// Marshal is a UTF-8 friendly marshaler.  Go's json.Marshal is not UTF-8
+// friendly because it replaces the valid UTF-8 and JSON characters "&". "<",
+// ">" with the "slash u" unicode escaped forms (e.g. \u0026).  It preemptively
+// escapes for HTML friendliness.  Where text may include any of these
+// characters, json.Marshal should not be used. Playground of Go breaking a
+// title: https://play.golang.org/p/o2hiX0c62oN
+// Source: https://stackoverflow.com/a/69502657/5684541
+func Marshal(i interface{}) ([]byte, error) {
+	buffer := &bytes.Buffer{}
+	encoder := json.NewEncoder(buffer)
+	encoder.SetEscapeHTML(false)
+	err := encoder.Encode(i)
+	return bytes.TrimRight(buffer.Bytes(), "\n"), err
+}
+
 func getCmd(n *ExtendedNode) []string {
 	cmd := []string{}
 	for node := n; node != nil; node = node.Next {
 		// Split value by whitespace
-		parts := regexp.MustCompile("[ \t]+").Split(strings.Trim(node.Value, " \t"), -1)
-		// Remove empty parts
-
-		cmd = append(cmd, parts...)
+		rawValue := strings.Trim(node.Value, " \t")
 		if len(node.Flags) > 0 {
-			cmd = append(cmd, node.Flags...)
+			rawValue += " " + strings.Join(node.Flags, " ")
 		}
+		parts, err := shlex.Split(rawValue)
+		if err != nil {
+			log.Fatalf("Error splitting: %s\n", node.Value)
+		}
+		cmd = append(cmd, parts...)
 	}
 	// log.Printf("getCmd: %v\n", cmd)
 	return cmd
@@ -346,7 +364,7 @@ func getCmd(n *ExtendedNode) []string {
 
 func formatCmd(n *ExtendedNode, c *Config) string {
 	cmd := getCmd(n.Next)
-	b, err := json.Marshal(cmd)
+	b, err := Marshal(cmd)
 	if err != nil {
 		return ""
 	}
