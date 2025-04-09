@@ -27,7 +27,10 @@ var rootCmd = &cobra.Command{
 
 func Run(cmd *cobra.Command, args []string) {
 	for _, fileName := range args {
-		originalLines := lib.GetFileLines(fileName)
+		originalLines, err := lib.GetFileLines(fileName)
+		if err != nil {
+			log.Fatalf("Failed to read file %s: %v", fileName, err)
+		}
 		formattedLines := lib.FormatFileLines(originalLines, indentSize, newlineFlag)
 
 		if checkFlag {

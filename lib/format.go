@@ -370,11 +370,11 @@ func formatMaintainer(n *ExtendedNode, c *Config) string {
 	return "LABEL org.opencontainers.image.authors=\"" + maintainer + "\"\n"
 }
 
-func GetFileLines(fileName string) []string {
+func GetFileLines(fileName string) ([]string, error) {
 	// Open the file
 	f, err := os.Open(fileName)
 	if err != nil {
-		panic(err)
+		return []string{}, err
 	}
 	defer f.Close()
 
@@ -383,7 +383,7 @@ func GetFileLines(fileName string) []string {
 	io.Copy(b, f)
 	fileLines := strings.SplitAfter(b.String(), "\n")
 
-	return fileLines
+	return fileLines, nil
 }
 
 func StripWhitespace(lines string, rightOnly bool) string {
