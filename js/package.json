@@ -1,6 +1,6 @@
 {
   "name": "@reteps/dockerfmt",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "type": "module",
   "description": "",
   "repository": "git+https://github.com/reteps/dockerfmt/tree/main/js",
@@ -25,10 +25,9 @@
   "scripts": {
     "//": "Requires tinygo 0.38.0 or later",
     "build": "npm run build-go && npm run build-js",
-    "build-go": "tinygo build -o format.wasm -target wasm --no-debug",
+    "build-go": "tinygo build -o format.wasm -target wasm --no-debug -scheduler=none",
     "build-js": "tsc && cp format.wasm wasm_exec.js dist",
-    "format": "prettier --write \"**/*.{js,ts,json}\"",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "format": "prettier --write \"**/*.{js,ts,json}\""
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
