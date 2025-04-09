@@ -50,11 +50,18 @@ repos:
 
 ## Limitations
 
-- The `RUN` parser currently doesn't support grouping or semicolons in commands
+- The `RUN` parser currently doesn't support grouping or semicolons in commands. Adding semicolon support is a non-trivial task.
+
+
 - No line wrapping is performed for long JSON commands
 - The `# escape=X` directive is not supported
 
 Contributions are welcome!
+
+## Issues
+
+- This is not production software until the `1.0.0` release, please treat it as such.
+- Please file issues for any bugs or feature requests!
 
 ## Features
 
