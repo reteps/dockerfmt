@@ -10,9 +10,14 @@ import (
 )
 
 //export formatBytes
-func formatBytes(contents []byte, indentSize uint, newlineFlag bool) *byte {
+func formatBytes(contents []byte, indentSize uint, newlineFlag bool, spaceRedirects bool) *byte {
 	originalLines := strings.SplitAfter(string(contents), "\n")
-	result := lib.FormatFileLines(originalLines, indentSize, newlineFlag)
+	c := &lib.Config{
+		IndentSize:      indentSize,
+		TrailingNewline: newlineFlag,
+		SpaceRedirects:  spaceRedirects,
+	}
+	result := lib.FormatFileLines(originalLines, c)
 	bytes := []byte(result)
 	return &bytes[0]
 }

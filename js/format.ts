@@ -3,6 +3,7 @@ import './wasm_exec.js'
 export interface FormatOptions {
     indent: number
     trailingNewline: boolean
+    spaceRedirects: boolean
 }
 
 export const formatDockerfileContents = async (
@@ -34,6 +35,7 @@ export const formatDockerfileContents = async (
             length: number,
             indent: number,
             trailingNewline: boolean,
+            spaceRedirects: boolean,
         ) => number
     }
 
@@ -48,6 +50,7 @@ export const formatDockerfileContents = async (
         fileBufferBytes.byteLength,
         options.indent,
         options.trailingNewline,
+        options.spaceRedirects,
     )
 
     // Decode the result

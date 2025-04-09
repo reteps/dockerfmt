@@ -34,6 +34,7 @@ type ParseState struct {
 type Config struct {
 	IndentSize      uint
 	TrailingNewline bool
+	SpaceRedirects  bool
 }
 
 func FormatNode(ast *ExtendedNode, c *Config) (string, bool) {
@@ -120,10 +121,7 @@ func FormatOnBuild(n *ExtendedNode, c *Config) string {
 	return n.OriginalMultiline
 }
 
-func FormatFileLines(fileLines []string, indentSize uint, trailingNewline bool) string {
-	// Top level library function that formats file contents given the lines and the config.
-	// Since we want this to work exposed to WASM, each config flag should be passed in separately
-	// and not as a struct.
+func FormatFileLines(fileLines []string, c *Config) string {
 	result, err := parser.Parse(strings.NewReader(strings.Join(fileLines, "")))
 	if err != nil {
 		log.Printf("%s\n", strings.Join(fileLines, ""))
@@ -136,10 +134,7 @@ func FormatFileLines(fileLines []string, indentSize uint, trailingNewline bool) 
 		AllOriginalLines: fileLines,
 	}
 	rootNode := BuildExtendedNode(result.AST, fileLines)
-	parseState.Config = &Config{
-		IndentSize:      indentSize,
-		TrailingNewline: trailingNewline,
-	}
+	parseState.Config = c
 	parseState.processNode(rootNode)
 
 	// After all directives are processed, we need to check if we have any trailing comments to add.
@@ -150,7 +145,7 @@ func FormatFileLines(fileLines []string, indentSize uint, trailingNewline bool) 
 
 	parseState.Output = strings.TrimRight(parseState.Output, "\n")
 	// Ensure the output ends with a newline if requested
-	if trailingNewline {
+	if c.TrailingNewline {
 		parseState.Output += "\n"
 	}
 	return parseState.Output
@@ -243,7 +238,7 @@ func formatShell(content string, hereDoc bool, c *Config) string {
 
 	// Now that we have a valid bash-style command, we can format it with shfmt
 	// log.Printf("Content1: %s\n", content)
-	content = formatBash(content, c.IndentSize)
+	content = formatBash(content, c)
 	// log.Printf("Content2: %s\n", content)
 
 	if !hereDoc {
@@ -468,7 +463,7 @@ func IndentFollowingLines(lines string, indentSize uint) string {
 	return result
 }
 
-func formatBash(s string, indentSize uint) string {
+func formatBash(s string, c *Config) string {
 	r := strings.NewReader(s)
 	f, err := syntax.NewParser(syntax.KeepComments(true)).Parse(r, "")
 	if err != nil {
@@ -479,7 +474,8 @@ func formatBash(s string, indentSize uint) string {
 	syntax.NewPrinter(
 		syntax.Minify(false),
 		syntax.SingleLine(false),
-		syntax.Indent(indentSize),
+		syntax.SpaceRedirects(c.SpaceRedirects),
+		syntax.Indent(c.IndentSize),
 		syntax.BinaryNextLine(true),
 	).Print(buf, f)
 	return buf.String()

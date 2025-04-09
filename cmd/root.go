@@ -11,10 +11,11 @@ import (
 )
 
 var (
-	writeFlag   bool
-	checkFlag   bool
-	newlineFlag bool
-	indentSize  uint
+	writeFlag      bool
+	checkFlag      bool
+	newlineFlag    bool
+	indentSize     uint
+	spaceRedirects bool
 )
 
 var rootCmd = &cobra.Command{
@@ -31,7 +32,12 @@ func Run(cmd *cobra.Command, args []string) {
 		if err != nil {
 			log.Fatalf("Failed to read file %s: %v", fileName, err)
 		}
-		formattedLines := lib.FormatFileLines(originalLines, indentSize, newlineFlag)
+		c := &lib.Config{
+			IndentSize:      indentSize,
+			TrailingNewline: newlineFlag,
+			SpaceRedirects:  spaceRedirects,
+		}
+		formattedLines := lib.FormatFileLines(originalLines, c)
 
 		if checkFlag {
 			// Check if the file is already formatted
@@ -58,6 +64,7 @@ func init() {
 	rootCmd.Flags().BoolVarP(&checkFlag, "check", "c", false, "Check if the file(s) are formatted")
 	rootCmd.Flags().BoolVarP(&newlineFlag, "newline", "n", false, "End the file with a trailing newline")
 	rootCmd.Flags().UintVarP(&indentSize, "indent", "i", 4, "Number of spaces to use for indentation")
+	rootCmd.Flags().BoolVarP(&spaceRedirects, "space-redirects", "s", false, "Redirect operators will be followed by a space")
 }
 
 func Execute() {

@@ -1,6 +1,6 @@
 {
   "name": "@reteps/dockerfmt",
-  "version": "0.2.8",
+  "version": "0.3.0",
   "type": "module",
   "description": "",
   "repository": "git+https://github.com/reteps/dockerfmt/tree/main/js",
