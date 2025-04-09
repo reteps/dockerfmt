@@ -28,6 +28,7 @@ var rootCmd = &cobra.Command{
 func Run(cmd *cobra.Command, args []string) {
 	for _, fileName := range args {
 		originalLines := lib.GetFileLines(fileName)
+		fmt.Printf("newlineFlag: %v\n", newlineFlag)
 		formattedLines := lib.FormatFileLines(originalLines, indentSize, newlineFlag)
 
 		if checkFlag {

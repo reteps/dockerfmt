@@ -147,13 +147,10 @@ func FormatFileLines(fileLines []string, indentSize uint, trailingNewline bool) 
 		parseState.Output += FormatComments(parseState.AllOriginalLines[parseState.CurrentLine:])
 	}
 
+	parseState.Output = strings.TrimRight(parseState.Output, "\n")
 	// Ensure the output ends with a newline if requested
 	if trailingNewline {
-		if parseState.Output[len(parseState.Output)-1] != '\n' {
-			parseState.Output += "\n"
-		}
-	} else {
-		parseState.Output = strings.TrimSuffix(parseState.Output, "\n")
+		parseState.Output += "\n"
 	}
 	return parseState.Output
 }
@@ -312,7 +309,7 @@ func formatRun(n *ExtendedNode, c *Config) string {
 	} else {
 		content = formatShell(content, hereDoc, c)
 		if hereDoc {
-			content = "<<" + n.Node.Heredocs[0].Name + "\n" + content + n.Node.Heredocs[0].Name
+			content = "<<" + n.Node.Heredocs[0].Name + "\n" + content + n.Node.Heredocs[0].Name + "\n"
 		}
 	}
 
