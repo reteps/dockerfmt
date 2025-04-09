@@ -42,6 +42,9 @@ repos:
     rev: main
     hooks:
       - id: dockerfmt
+        args:
+          # optional: add additional arguments here
+          - --indent=4
 ```
 
 ## Limitations

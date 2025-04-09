@@ -5,6 +5,7 @@
   alias: dockerfmt
   args:
     - --write
+    - --newline
   description: Format Dockerfile files
   entry: dockerfmt
   files: ^.*Dockerfile.*$
