@@ -30,6 +30,23 @@ Flags:
 Use "dockerfmt [command] --help" for more information about a command.
 ```
 
+## Pre-commit
+
+You can add the following entry to your `.pre-commit-config.yaml` file to use
+`dockerfmt` as a pre-commit hook:
+
+```yaml
+repos:
+  - repo: https://github.com/reteps/dockerfmt
+    # run `pre-commit autoupdate` to pin the version
+    rev: main
+    hooks:
+      - id: dockerfmt
+        args:
+          # optional: add additional arguments here
+          - --indent=4
+```
+
 ## Limitations
 
 - The `RUN` parser currently doesn't support grouping or semicolons in commands

@@ -1,0 +1,19 @@
+---
+- additional_dependencies:
+    - ./cmd
+    - ./lib
+  alias: dockerfmt
+  args:
+    - --write
+    - --newline
+  description: Format Dockerfile files
+  entry: dockerfmt
+  files: ^.*Dockerfile.*$
+  id: dockerfmt
+  language: golang
+  name: dockerfmt
+  pass_filenames: true
+  require_serial: false
+  types_or:
+    - file
+    - text
