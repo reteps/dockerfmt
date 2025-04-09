@@ -229,11 +229,65 @@ func formatShell(content string, hereDoc bool, c *Config) string {
 	}
 
 	if !hereDoc {
+		// Here lies some cursed magic. Be careful.
+
 		// Replace comments with a subshell evaluation -- they won't be run so we can do this.
 		content = StripWhitespace(content, true)
+		lineComment := regexp.MustCompile(`(\n\s*)(#.*)`)
+		content = lineComment.ReplaceAllString(content, "$1`$2#`\\")
+
+		/*
+			```
+			foo \
+			`#comment#`\
+			&& bar
+			```
+
+			```
+			foo && \
+			`#comment#` \
+			bar
+			```
+		*/
+
+		commentContinuation := regexp.MustCompile(`(\\(?:\s*` + "`#.*#`" + `\\){1,}\s*)&&`)
+		content = commentContinuation.ReplaceAllString(content, "&&$1")
+
 		// log.Printf("Content0: %s\n", content)
-		re := regexp.MustCompile(`(\\\n\s+)((?:\s*#.*){1,})`)
-		content = re.ReplaceAllString(content, `'dummynode';$1$( $2`+"\n"+`)\`)
+		lines := strings.SplitAfter(content, "\n")
+		/**
+		if the next line is not a comment, and we didn't start with a continuation, don't add the `&&`.
+		*/
+		inContinutation := false
+		for i := range lines {
+			lineTrim := strings.Trim(lines[i], " \t\\\n")
+			// fmt.Printf("LineTrim: %s\n", lineTrim)
+			nextLine := ""
+			isComment := false
+			nextLineIsComment := false
+			if i+1 < len(lines) {
+				nextLine = strings.Trim(lines[i+1], " \t\\\n")
+			}
+			if len(nextLine) >= 2 && nextLine[:2] == "`#" {
+				nextLineIsComment = true
+			}
+			if len(lineTrim) >= 2 && lineTrim[:2] == "`#" {
+				isComment = true
+			}
+
+			// fmt.Printf("isComment: %v, nextLineIsComment: %v, inContinutation: %v\n", isComment, nextLineIsComment, inContinutation)
+			if isComment && (inContinutation || nextLineIsComment) {
+				lines[i] = strings.Replace(lines[i], "#`\\", "#`&&\\", 1)
+			}
+
+			if len(lineTrim) >= 2 && !isComment && lineTrim[len(lineTrim)-2:] == "&&" {
+				inContinutation = true
+			} else if !isComment {
+				inContinutation = false
+			}
+		}
+
+		content = strings.Join(lines, "")
 	}
 
 	// Now that we have a valid bash-style command, we can format it with shfmt
@@ -242,25 +296,28 @@ func formatShell(content string, hereDoc bool, c *Config) string {
 	// log.Printf("Content2: %s\n", content)
 
 	if !hereDoc {
-		content = regexp.MustCompile(`\$\(\s+(#[\w\W]*?)\s+\) \\`).ReplaceAllString(content, "$1")
-		// log.Printf("Content3: %s\n", content)
-		content = strings.ReplaceAll(content, "'dummynode' ", "")
-		content = strings.ReplaceAll(content, "'dummynode'", "")
-		content = regexp.MustCompile(`(\s*#.*)`).ReplaceAllString(content, "$1")
-		// log.Printf("Content4: %s\n", content)
-		content = regexp.MustCompile("(?m)^ *(#.*)").ReplaceAllString(content, strings.Repeat(" ", int(c.IndentSize))+"$1")
+		reBacktickComment := regexp.MustCompile(`([ \t]*)(?:&& )?` + "`(#.*)#` " + `\\`)
+		content = reBacktickComment.ReplaceAllString(content, "$1$2")
 
-		// Add backslashes if needed
+		// Fixup the comment indentation
 		lines := strings.SplitAfter(content, "\n")
-		for i := 0; i < len(lines); i++ {
-			line := lines[i]
-			if len(line) > 0 && line[len(line)-2] != '\\' && line[len(line)-1] == '\n' {
-				// Check if the next line is empty and if the current line is not a comment
-				if i+1 < len(lines) && strings.TrimSpace(lines[i+1]) != "" && strings.TrimSpace(line)[0] != '#' {
-					line = strings.TrimRight(line, " \n") + " \\\n"
+		prevIsComment := false
+		prevCommentSpacing := ""
+		for i := range lines {
+			lineTrim := strings.TrimLeft(lines[i], " \t")
+			// fmt.Printf("LineTrim: %s, %v\n", lineTrim, prevIsComment)
+			if len(lineTrim) >= 1 && lineTrim[0] == '#' {
+				lineParts := strings.SplitN(lines[i], "#", 2)
+
+				if prevIsComment {
+					lines[i] = prevCommentSpacing + "#" + lineParts[1]
+				} else {
+					prevCommentSpacing = lineParts[0]
 				}
+				prevIsComment = true
+			} else {
+				prevIsComment = false
 			}
-			lines[i] = line
 		}
 		content = strings.Join(lines, "")
 

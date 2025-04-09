@@ -12,3 +12,11 @@ RUN yarn           --frozen-lockfile &&            \
 FROM          abiosoft/caddy
 COPY --from=builder          /app/packages/ufc-host-app/build /srv
 EXPOSE      2015
+
+FROM foobar   
+RUN ls
+LABEL foo=bar   
+HEALTHCHECK NONE   
+CMD ls
+COPY . .   
+ADD . .   

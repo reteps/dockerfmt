@@ -28,3 +28,5 @@ RUN if [[ x$LATEST_NPM = xtrue ]]; then yarn global add npm@latest; fi
 FROM ubuntu
 
 RUN (cd out && ls)
+
+RUN ls ; ls
