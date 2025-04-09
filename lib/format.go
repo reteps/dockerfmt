@@ -234,6 +234,15 @@ func formatShell(content string, hereDoc bool, c *Config) string {
 		// Replace comments with a subshell evaluation -- they won't be run so we can do this.
 		content = StripWhitespace(content, true)
 		lineComment := regexp.MustCompile(`(\n\s*)(#.*)`)
+		lines := strings.SplitAfter(content, "\n")
+		for i := range lines {
+			lineTrim := strings.TrimLeft(lines[i], " \t")
+			if len(lineTrim) >= 1 && lineTrim[0] == '#' {
+				lines[i] = strings.ReplaceAll(lines[i], "`", "×")
+			}
+		}
+		content = strings.Join(lines, "")
+
 		content = lineComment.ReplaceAllString(content, "$1`$2#`\\")
 
 		/*
@@ -254,7 +263,7 @@ func formatShell(content string, hereDoc bool, c *Config) string {
 		content = commentContinuation.ReplaceAllString(content, "&&$1")
 
 		// log.Printf("Content0: %s\n", content)
-		lines := strings.SplitAfter(content, "\n")
+		lines = strings.SplitAfter(content, "\n")
 		/**
 		if the next line is not a comment, and we didn't start with a continuation, don't add the `&&`.
 		*/
@@ -293,6 +302,7 @@ func formatShell(content string, hereDoc bool, c *Config) string {
 	// Now that we have a valid bash-style command, we can format it with shfmt
 	// log.Printf("Content1: %s\n", content)
 	content = formatBash(content, c)
+
 	// log.Printf("Content2: %s\n", content)
 
 	if !hereDoc {
@@ -320,6 +330,7 @@ func formatShell(content string, hereDoc bool, c *Config) string {
 			}
 		}
 		content = strings.Join(lines, "")
+		content = strings.ReplaceAll(content, "×", "`")
 
 	}
 	return content
