@@ -6,16 +6,18 @@
   "repository": "git+https://github.com/reteps/dockerfmt/tree/main/js",
   "author": "Peter Stenger <pete@stenger.io>",
   "license": "MIT",
+  "engines": {
+    "node": "^v12.20.0 || ^14.13.0 || >=16.0.0"
+  },
   "exports": {
     ".": {
-      "types": "./dist/node.d.ts",
       "browser": {
-        "default": "./dist/format.js",
-        "types": "./dist/format.d.ts"
+        "types": "./dist/format.d.ts",
+        "default": "./dist/format.js"
       },
       "default": {
-        "default": "./dist/node.js",
-        "types": "./dist/node.d.ts"
+        "types": "./dist/node.d.ts",
+        "default": "./dist/node.js"
       }
     },
     "./format.wasm": "./dist/format.wasm",
