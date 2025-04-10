@@ -44,7 +44,7 @@ func FormatNode(ast *ExtendedNode, c *Config) (string, bool) {
 		command.Arg:         formatBasic,
 		command.Cmd:         formatCmd,
 		command.Copy:        formatSpaceSeparated,
-		command.Entrypoint:  formatCmd,
+		command.Entrypoint:  formatEntrypoint,
 		command.Env:         formatEnv,
 		command.Expose:      formatSpaceSeparated,
 		command.From:        formatSpaceSeparated,
@@ -341,10 +341,7 @@ func formatRun(n *ExtendedNode, c *Config) string {
 	flags := n.Node.Flags
 
 	var content string
-	if len(n.Node.Heredocs) > 1 {
-		// Not implemented yet
-		panic("Multiple Heredocs not implemented yet")
-	} else if len(n.Node.Heredocs) == 1 {
+	if len(n.Node.Heredocs) >= 1 {
 		content = n.Node.Heredocs[0].Content
 		hereDoc = true
 		// TODO: check if doc.FileDescriptor == 0?
@@ -373,7 +370,8 @@ func formatRun(n *ExtendedNode, c *Config) string {
 	} else {
 		content = formatShell(content, hereDoc, c)
 		if hereDoc {
-			content = "<<" + n.Node.Heredocs[0].Name + "\n" + content + n.Node.Heredocs[0].Name + "\n"
+			n.Node.Heredocs[0].Content = content
+			content, _ = GetHeredoc(n)
 		}
 	}
 
@@ -384,12 +382,33 @@ func formatRun(n *ExtendedNode, c *Config) string {
 	return strings.ToUpper(n.Value) + " " + content
 }
 
+func GetHeredoc(n *ExtendedNode) (string, bool) {
+	if len(n.Node.Heredocs) == 0 {
+		return "", false
+	}
+
+	printAST(n, 0)
+	args := []string{}
+	cur := n.Next
+	for cur != nil {
+		if cur.Node.Value != "" {
+			args = append(args, cur.Node.Value)
+		}
+		cur = cur.Next
+	}
+
+	content := strings.Join(args, " ") + "\n" + n.Node.Heredocs[0].Content + n.Node.Heredocs[0].Name + "\n"
+	return content, true
+}
 func formatBasic(n *ExtendedNode, c *Config) string {
 	// Uppercases the command, and indent the following lines
 	originalTrimmed := strings.TrimLeft(n.OriginalMultiline, " \t")
 
-	parts := regexp.MustCompile(" ").Split(originalTrimmed, 2)
-	return IndentFollowingLines(strings.ToUpper(n.Value)+" "+parts[1], c.IndentSize)
+	value, success := GetHeredoc(n)
+	if !success {
+		value = regexp.MustCompile(" ").Split(originalTrimmed, 2)[1]
+	}
+	return IndentFollowingLines(strings.ToUpper(n.Value)+" "+value, c.IndentSize)
 }
 
 // Marshal is a UTF-8 friendly marshaler.  Go's json.Marshal is not UTF-8
@@ -407,47 +426,99 @@ func Marshal(i interface{}) ([]byte, error) {
 	return bytes.TrimRight(buffer.Bytes(), "\n"), err
 }
 
-func getCmd(n *ExtendedNode) []string {
+func getCmd(n *ExtendedNode, shouldSplitNode bool) []string {
 	cmd := []string{}
 	for node := n; node != nil; node = node.Next {
 		// Split value by whitespace
-		rawValue := strings.Trim(node.Value, " \t")
-		if len(node.Flags) > 0 {
-			rawValue += " " + strings.Join(node.Flags, " ")
+		rawValue := strings.Trim(node.Node.Value, " \t")
+		if len(node.Node.Flags) > 0 {
+			cmd = append(cmd, node.Node.Flags...)
 		}
-		parts, err := shlex.Split(rawValue)
-		if err != nil {
-			log.Fatalf("Error splitting: %s\n", node.Value)
+		// log.Printf("ShouldSplitNode: %v\n", shouldSplitNode)
+		if shouldSplitNode {
+			parts, err := shlex.Split(rawValue)
+			if err != nil {
+				log.Fatalf("Error splitting: %s\n", node.Node.Value)
+			}
+			cmd = append(cmd, parts...)
+		} else {
+			cmd = append(cmd, rawValue)
 		}
-		cmd = append(cmd, parts...)
 	}
 	// log.Printf("getCmd: %v\n", cmd)
 	return cmd
 }
 
+func formatEntrypoint(n *ExtendedNode, c *Config) string {
+	// this can technically change behavior. https://docs.docker.com/reference/dockerfile/#understand-how-cmd-and-entrypoint-interact
+	isJSON, ok := n.Node.Attributes["json"]
+	if !ok {
+		isJSON = false
+	}
+	if !isJSON {
+		// https://docs.docker.com/reference/dockerfile/#entrypoint
+		node := n.Next.Node.Value
+		parts, err := shlex.Split(node)
+		if err != nil {
+			log.Fatalf("Error splitting: %s\n", node)
+		}
+
+		doNotSplit := false
+		// This is a simplistic check to determine if we need to run in a full shell.
+		for _, part := range parts {
+			if part == "&&" || part == ";" || part == "||" {
+				doNotSplit = true
+				break
+			}
+		}
+
+		if doNotSplit {
+			n.Next.Node.Flags = append(n.Next.Node.Flags, []string{"/bin/sh", "-c"}...)
+			// Hacky workaround to tell getCmd to not split the command
+			if n.Node.Attributes == nil {
+				n.Node.Attributes = make(map[string]bool)
+			}
+			n.Node.Attributes["json"] = true
+		}
+	}
+	// printAST(n, 0)
+	return formatCmd(n, c)
+}
 func formatCmd(n *ExtendedNode, c *Config) string {
-	cmd := getCmd(n.Next)
+	// printAST(n, 0)
+	isJSON, ok := n.Node.Attributes["json"]
+	if !ok {
+		isJSON = false
+	}
+	cmd := getCmd(n.Next, !isJSON)
 	b, err := Marshal(cmd)
 	if err != nil {
 		return ""
 	}
 	bWithSpace := strings.ReplaceAll(string(b), "\",\"", "\", \"")
-	return strings.ToUpper(n.Value) + " " + string(bWithSpace) + "\n"
+	return strings.ToUpper(n.Node.Value) + " " + string(bWithSpace) + "\n"
 }
 
 func formatSpaceSeparated(n *ExtendedNode, c *Config) string {
-	cmd := strings.Join(getCmd(n.Next), " ")
-	if len(n.Node.Flags) > 0 {
-		cmd = strings.Join(n.Node.Flags, " ") + " " + cmd
+	isJSON, ok := n.Node.Attributes["json"]
+	if !ok {
+		isJSON = false
+	}
+	cmd, success := GetHeredoc(n)
+	if !success {
+		cmd = strings.Join(getCmd(n.Next, isJSON), " ")
+		if len(n.Node.Flags) > 0 {
+			cmd = strings.Join(n.Node.Flags, " ") + " " + cmd
+		}
 	}
 
-	return strings.ToUpper(n.Value) + " " + cmd + "\n"
+	return strings.ToUpper(n.Node.Value) + " " + cmd + "\n"
 }
 
 func formatMaintainer(n *ExtendedNode, c *Config) string {
 
 	// Get text between quotes
-	maintainer := strings.Trim(n.Next.Value, "\"")
+	maintainer := strings.Trim(n.Next.Node.Value, "\"")
 	return "LABEL org.opencontainers.image.authors=\"" + maintainer + "\"\n"
 }
 

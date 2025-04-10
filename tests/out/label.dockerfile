@@ -52,4 +52,4 @@ ADD https://www.qlcplus.org/downloads/${QLC_VERSION}/qlcplus_${QLC_VERSION}_amd6
 RUN dpkg -i /opt/qlcplus.deb
 
 # https://www.qlcplus.org/docs/html_en_EN/commandlineparameters.html
-CMD ["/usr/bin/qlcplus", "--operate", "--web", "--open", "/QLC/default_workspace.qxw"]
+CMD ["/usr/bin/qlcplus", "--operate", "--web", "--open /QLC/default_workspace.qxw"]

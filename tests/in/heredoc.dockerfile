@@ -4,12 +4,15 @@ echo "World!">>/hello
 EOF
 RUN ls
 
-RUN <<EOF
+RUN <<-EOF
 echo "Hello" >>             /hello
 echo "World!">>/hello
 EOF
 
-RUN ls
+COPY <<-EOF /x
+x
+EOF
 
-
-
+COPY <<-EOT /script.sh
+  echo "hello ${FOO}"
+EOT
