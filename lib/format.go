@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/google/shlex"
@@ -313,10 +314,15 @@ func formatShell(content string, hereDoc bool, c *Config) string {
 		lines := strings.SplitAfter(content, "\n")
 		prevIsComment := false
 		prevCommentSpacing := ""
+		firstLineIsComment := false
 		for i := range lines {
 			lineTrim := strings.TrimLeft(lines[i], " \t")
 			// fmt.Printf("LineTrim: %s, %v\n", lineTrim, prevIsComment)
 			if len(lineTrim) >= 1 && lineTrim[0] == '#' {
+				if i == 0 {
+					firstLineIsComment = true
+					lines[i] = strings.Repeat(" ", int(c.IndentSize)) + lineTrim
+				}
 				lineParts := strings.SplitN(lines[i], "#", 2)
 
 				if prevIsComment {
@@ -328,6 +334,10 @@ func formatShell(content string, hereDoc bool, c *Config) string {
 			} else {
 				prevIsComment = false
 			}
+		}
+		// TODO: this formatting isn't perfect (see tests/out/run5.dockerfile)
+		if firstLineIsComment {
+			lines = slices.Insert(lines, 0, "\\\n")
 		}
 		content = strings.Join(lines, "")
 		content = strings.ReplaceAll(content, "×", "`")
@@ -387,7 +397,7 @@ func GetHeredoc(n *ExtendedNode) (string, bool) {
 		return "", false
 	}
 
-	printAST(n, 0)
+	// printAST(n, 0)
 	args := []string{}
 	cur := n.Next
 	for cur != nil {
