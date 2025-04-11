@@ -406,7 +406,6 @@ func GetHeredoc(n *ExtendedNode) (string, bool) {
 		}
 		cur = cur.Next
 	}
-
 	content := strings.Join(args, " ") + "\n" + n.Node.Heredocs[0].Content + n.Node.Heredocs[0].Name + "\n"
 	return content, true
 }
@@ -520,9 +519,10 @@ func formatSpaceSeparated(n *ExtendedNode, c *Config) string {
 		if len(n.Node.Flags) > 0 {
 			cmd = strings.Join(n.Node.Flags, " ") + " " + cmd
 		}
+		cmd += "\n"
 	}
 
-	return strings.ToUpper(n.Node.Value) + " " + cmd + "\n"
+	return strings.ToUpper(n.Node.Value) + " " + cmd
 }
 
 func formatMaintainer(n *ExtendedNode, c *Config) string {

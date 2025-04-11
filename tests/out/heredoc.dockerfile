@@ -13,7 +13,9 @@ COPY <<-EOF /x
 x
 EOF
 
-
 COPY <<-EOT /script.sh
   echo "hello ${FOO}"
 EOT
+COPY <<-EOF /x
+x
+EOF

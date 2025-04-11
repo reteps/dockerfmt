@@ -12,7 +12,7 @@ Binaries are available from the [releases](https://github.com/reteps/dockerfmt/r
 A updated version of the dockfmt. Uses the dockerfile parser from moby/buildkit and the shell formatter from mvdan/sh.
 
 Usage:
-  dockerfmt [Dockerfile] [flags]
+  dockerfmt [Dockerfile...] [flags]
   dockerfmt [command]
 
 Available Commands:
