@@ -45,7 +45,6 @@ func TestFormatter(t *testing.T) {
 			}
 			// Compare outLines with formattedLines
 			assert.Equal(t, strings.Join(outLines, ""), formattedLines, "Files should be equal")
-
 		})
 	}
 }
