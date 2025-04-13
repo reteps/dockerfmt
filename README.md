@@ -4,7 +4,15 @@ Dockerfile formatter, and a modern version of [dockfmt](https://github.com/jessf
 
 ## Installation
 
+### Binaries
+
 Binaries are available from the [releases](https://github.com/reteps/dockerfmt/releases) page.
+
+### go install
+
+```bash
+go install github.com/reteps/dockerfmt@latest
+```
 
 ## Usage
 
@@ -52,7 +60,6 @@ repos:
 
 - The `RUN` parser currently doesn't support grouping or semicolons in commands. Adding semicolon support is a non-trivial task.
 
-
 - No line wrapping is performed for long JSON commands
 - The `# escape=X` directive is not supported
 
@@ -91,7 +98,6 @@ RUN echo "hello" \
 ```
 
 This is surprisingly [non-trivial](https://github.com/moby/buildkit/issues/5889) as we want to attach the comments to their position in the formatted output, but they are stripped by the parser beforehand.
-
 
 ## JS Bindings
 
