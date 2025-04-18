@@ -458,39 +458,26 @@ func getCmd(n *ExtendedNode, shouldSplitNode bool) []string {
 	return cmd
 }
 
+func shouldRunInShell(node string) bool {
+	// https://docs.docker.com/reference/dockerfile/#entrypoint
+	parts, err := shlex.Split(node)
+	if err != nil {
+		log.Fatalf("Error splitting: %s\n", node)
+	}
+
+	needsShell := false
+	// This is a simplistic check to determine if we need to run in a full shell.
+	for _, part := range parts {
+		if part == "&&" || part == ";" || part == "||" {
+			needsShell = true
+			break
+		}
+	}
+
+	return needsShell
+}
 func formatEntrypoint(n *ExtendedNode, c *Config) string {
 	// this can technically change behavior. https://docs.docker.com/reference/dockerfile/#understand-how-cmd-and-entrypoint-interact
-	isJSON, ok := n.Node.Attributes["json"]
-	if !ok {
-		isJSON = false
-	}
-	if !isJSON {
-		// https://docs.docker.com/reference/dockerfile/#entrypoint
-		node := n.Next.Node.Value
-		parts, err := shlex.Split(node)
-		if err != nil {
-			log.Fatalf("Error splitting: %s\n", node)
-		}
-
-		doNotSplit := false
-		// This is a simplistic check to determine if we need to run in a full shell.
-		for _, part := range parts {
-			if part == "&&" || part == ";" || part == "||" {
-				doNotSplit = true
-				break
-			}
-		}
-
-		if doNotSplit {
-			n.Next.Node.Flags = append(n.Next.Node.Flags, []string{"/bin/sh", "-c"}...)
-			// Hacky workaround to tell getCmd to not split the command
-			if n.Node.Attributes == nil {
-				n.Node.Attributes = make(map[string]bool)
-			}
-			n.Node.Attributes["json"] = true
-		}
-	}
-	// printAST(n, 0)
 	return formatCmd(n, c)
 }
 func formatCmd(n *ExtendedNode, c *Config) string {
@@ -499,6 +486,16 @@ func formatCmd(n *ExtendedNode, c *Config) string {
 	if !ok {
 		isJSON = false
 	}
+
+	if !isJSON {
+		doNotSplit := shouldRunInShell(n.Node.Next.Value)
+		if doNotSplit {
+			n.Next.Node.Flags = append(n.Next.Node.Flags, []string{"/bin/sh", "-c"}...)
+			// Hacky workaround to tell getCmd to not split the command
+			isJSON = true
+		}
+	}
+
 	cmd := getCmd(n.Next, !isJSON)
 	b, err := Marshal(cmd)
 	if err != nil {
