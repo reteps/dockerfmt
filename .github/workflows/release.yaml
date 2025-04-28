@@ -1,4 +1,5 @@
 on:
+  workflow_dispatch:
   release:
     types: [created]
   
@@ -7,6 +8,16 @@ permissions:
   packages: write
 
 jobs:
+  release-docker:
+    name: Release Docker Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - uses: ko-build/setup-ko@v0.8
+      - run: ko build
   releases-matrix:
     name: Release Go Binary
     runs-on: ubuntu-latest
