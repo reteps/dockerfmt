@@ -14,6 +14,12 @@ Binaries are available from the [releases](https://github.com/reteps/dockerfmt/r
 go install github.com/reteps/dockerfmt@latest
 ```
 
+### docker
+
+```bash
+docker run --rm -v $(pwd):/pwd ghcr.io/reteps/dockerfmt:latest /pwd/tests/in/run2.dockerfile
+```
+
 ## Usage
 
 ```output

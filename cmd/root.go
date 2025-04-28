@@ -46,6 +46,11 @@ func Run(cmd *cobra.Command, args []string) {
 			log.Fatalf("Failed to read from stdin: %v", err)
 		}
 
+		if len(inputBytes) <= 1 {
+			cmd.Help()
+			os.Exit(0)
+		}
+
 		if !processInput("stdin", inputBytes, config) {
 			allFormatted = false // Mark as not formatted if check fails
 		}
