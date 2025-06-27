@@ -6,7 +6,7 @@
   args:
     - --write
     - --newline
-    - --indent
+    - --indent=4
     - --space-redirects
   description: Format Dockerfile files
   entry: dockerfmt
