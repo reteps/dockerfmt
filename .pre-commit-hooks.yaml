@@ -16,6 +16,6 @@
   name: dockerfmt
   pass_filenames: true
   require_serial: false
+  exclude: ".dockerignore$"
   types_or:
-    - file
-    - text
+    - dockerfile
