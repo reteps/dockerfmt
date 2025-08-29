@@ -268,7 +268,7 @@ func formatShell(content string, hereDoc bool, c *Config) string {
 		/**
 		if the next line is not a comment, and we didn't start with a continuation, don't add the `&&`.
 		*/
-		inContinutation := false
+		inContinuation := false
 		for i := range lines {
 			lineTrim := strings.Trim(lines[i], " \t\\\n")
 			// fmt.Printf("LineTrim: %s\n", lineTrim)
@@ -285,15 +285,15 @@ func formatShell(content string, hereDoc bool, c *Config) string {
 				isComment = true
 			}
 
-			// fmt.Printf("isComment: %v, nextLineIsComment: %v, inContinutation: %v\n", isComment, nextLineIsComment, inContinutation)
-			if isComment && (inContinutation || nextLineIsComment) {
+			// fmt.Printf("isComment: %v, nextLineIsComment: %v, inContinuation: %v\n", isComment, nextLineIsComment, inContinuation)
+			if isComment && (inContinuation || nextLineIsComment) {
 				lines[i] = strings.Replace(lines[i], "#`\\", "#`&&\\", 1)
 			}
 
 			if len(lineTrim) >= 2 && !isComment && lineTrim[len(lineTrim)-2:] == "&&" {
-				inContinutation = true
+				inContinuation = true
 			} else if !isComment {
-				inContinutation = false
+				inContinuation = false
 			}
 		}
 
