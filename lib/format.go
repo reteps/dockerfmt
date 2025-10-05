@@ -214,7 +214,7 @@ func formatEnv(n *ExtendedNode, c *Config) string {
 
 	// Otherwise, we have a valid env command; fall back to original if parsing fails
 	originalTrimmed := strings.TrimLeft(n.OriginalMultiline, " \t")
-	parts := regexp.MustCompile(" ").Split(originalTrimmed, 2)
+	parts := regexp.MustCompile("[ \t]").Split(originalTrimmed, 2)
 	if len(parts) < 2 {
 		return n.OriginalMultiline
 	}
@@ -255,6 +255,7 @@ func formatShell(content string, hereDoc bool, c *Config) string {
 		content = strings.Join(lines, "")
 
 		content = lineComment.ReplaceAllString(content, "$1`$2#`\\")
+		// fmt.Printf("Content-1: %s\n", content)
 
 		/*
 			```
@@ -270,10 +271,11 @@ func formatShell(content string, hereDoc bool, c *Config) string {
 			```
 		*/
 
-		commentContinuation := regexp.MustCompile(`(\\(?:\s*` + "`#.*#`" + `\\){1,}\s*)&&`)
-		content = commentContinuation.ReplaceAllString(content, "&&$1")
+		// The (.[^\\]) prevents an edge case with '&& \'. See tests/in/andissue.dockerfile
+		commentContinuation := regexp.MustCompile(`(\\(?:\s*` + "`#.*#`" + `\\){1,}\s*)&&(.[^\\])`)
+		content = commentContinuation.ReplaceAllString(content, "&&$1$2")
 
-		// log.Printf("Content0: %s\n", content)
+		// fmt.Printf("Content0: %s\n", content)
 		lines = strings.SplitAfter(content, "\n")
 		/**
 		if the next line is not a comment, and we didn't start with a continuation, don't add the `&&`.
@@ -425,12 +427,12 @@ func formatBasic(n *ExtendedNode, c *Config) string {
 
 	value, success := GetHeredoc(n)
 	if !success {
-		parts := regexp.MustCompile(" ").Split(originalTrimmed, 2)
+		parts := regexp.MustCompile("[ \t]").Split(originalTrimmed, 2)
 		if len(parts) < 2 {
 			// No argument after directive; just return the directive itself
 			return strings.ToUpper(n.Value) + "\n"
 		}
-		value = parts[1]
+		value = strings.TrimLeft(parts[1], " \t")
 	}
 	return IndentFollowingLines(strings.ToUpper(n.Value)+" "+value, c.IndentSize)
 }
