@@ -43,3 +43,17 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
     && find /tmp -not -path /tmp -delete
+
+CMD apt-get update \
+    && apt-get install -y --no-install-recommends man-db unminimize \
+    && yes | unminimize \
+    && apt-get install -y --no-install-recommends \
+        nginx \
+        gettext \
+        gosu \
+        fonts-dejavu \
+        less htop vim nano silversearcher-ag zip unzip git cmake curl wget sqlite3 \
+    && gosu nobody true \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && find /tmp -not -path /tmp -delete

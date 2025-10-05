@@ -202,13 +202,23 @@ func BuildExtendedNode(n *parser.Node, fileLines []string) *ExtendedNode {
 }
 
 func formatEnv(n *ExtendedNode, c *Config) string {
-	// Only the legacy format will have a empty 3rd child
+	// Handle missing arguments safely
+	if n.Next == nil {
+		return strings.ToUpper(n.Node.Value)
+	}
+
+	// Only the legacy format will have an empty 3rd child
 	if n.Next.Next.Next.Value == "" {
 		return strings.ToUpper(n.Node.Value) + " " + n.Next.Node.Value + "=" + n.Next.Next.Node.Value + "\n"
 	}
-	// Otherwise, we have a valid env command
+
+	// Otherwise, we have a valid env command; fall back to original if parsing fails
 	originalTrimmed := strings.TrimLeft(n.OriginalMultiline, " \t")
-	content := StripWhitespace(regexp.MustCompile(" ").Split(originalTrimmed, 2)[1], true)
+	parts := regexp.MustCompile(" ").Split(originalTrimmed, 2)
+	if len(parts) < 2 {
+		return n.OriginalMultiline
+	}
+	content := StripWhitespace(parts[1], true)
 	// Indent all lines with indentSize spaces
 	re := regexp.MustCompile("(?m)^ *")
 	content = strings.Trim(re.ReplaceAllString(content, strings.Repeat(" ", int(c.IndentSize))), " ")
@@ -415,7 +425,12 @@ func formatBasic(n *ExtendedNode, c *Config) string {
 
 	value, success := GetHeredoc(n)
 	if !success {
-		value = regexp.MustCompile(" ").Split(originalTrimmed, 2)[1]
+		parts := regexp.MustCompile(" ").Split(originalTrimmed, 2)
+		if len(parts) < 2 {
+			// No argument after directive; just return the directive itself
+			return strings.ToUpper(n.Value) + "\n"
+		}
+		value = parts[1]
 	}
 	return IndentFollowingLines(strings.ToUpper(n.Value)+" "+value, c.IndentSize)
 }
@@ -458,51 +473,53 @@ func getCmd(n *ExtendedNode, shouldSplitNode bool) []string {
 	return cmd
 }
 
-func shouldRunInShell(node string) bool {
-	// https://docs.docker.com/reference/dockerfile/#entrypoint
-	parts, err := shlex.Split(node)
-	if err != nil {
-		log.Fatalf("Error splitting: %s\n", node)
-	}
-
-	needsShell := false
-	// This is a simplistic check to determine if we need to run in a full shell.
-	for _, part := range parts {
-		if part == "&&" || part == ";" || part == "||" {
-			needsShell = true
-			break
-		}
-	}
-
-	return needsShell
-}
 func formatEntrypoint(n *ExtendedNode, c *Config) string {
-	// this can technically change behavior. https://docs.docker.com/reference/dockerfile/#understand-how-cmd-and-entrypoint-interact
 	return formatCmd(n, c)
 }
 func formatCmd(n *ExtendedNode, c *Config) string {
-	// printAST(n, 0)
+	// Determine JSON form from parser attributes
 	isJSON, ok := n.Node.Attributes["json"]
 	if !ok {
 		isJSON = false
 	}
 
-	if !isJSON {
-		doNotSplit := shouldRunInShell(n.Node.Next.Value)
-		if doNotSplit {
-			n.Next.Node.Flags = append(n.Next.Node.Flags, []string{"/bin/sh", "-c"}...)
-			// Hacky workaround to tell getCmd to not split the command
-			isJSON = true
-		}
+	// Extract raw content after directive (and any flags)
+	flags := n.Node.Flags
+	originalText := n.OriginalMultiline
+	if originalText == "" {
+		originalText = n.Node.Original
+	}
+	originalTrimmed := strings.TrimLeft(originalText, " \t")
+	parts := regexp.MustCompile("[ \t]").Split(originalTrimmed, 2+len(flags))
+	if len(parts) < 1+len(flags) {
+		return strings.ToUpper(n.Value) + "\n"
+	}
+	var content string
+	if len(parts) >= 2+len(flags) {
+		content = parts[1+len(flags)]
 	}
 
-	cmd := getCmd(n.Next, !isJSON)
-	b, err := Marshal(cmd)
-	if err != nil {
-		return ""
+	// If JSON form (attribute or decodable), format as JSON array with spaces
+	var jsonItems []string
+	if isJSON || json.Unmarshal([]byte(content), &jsonItems) == nil {
+		items := getCmd(n.Next, false)
+		if !isJSON && len(items) == 0 {
+			items = jsonItems
+		}
+		b, err := Marshal(items)
+		if err != nil {
+			return ""
+		}
+		bWithSpace := strings.ReplaceAll(string(b), "\",\"", "\", \"")
+		return strings.ToUpper(n.Node.Value) + " " + bWithSpace + "\n"
 	}
-	bWithSpace := strings.ReplaceAll(string(b), "\",\"", "\", \"")
-	return strings.ToUpper(n.Node.Value) + " " + string(bWithSpace) + "\n"
+
+	// Otherwise, format as shell command
+	shell := formatShell(content, false, c)
+	if len(flags) > 0 {
+		shell = strings.Join(flags, " ") + " " + shell
+	}
+	return strings.ToUpper(n.Node.Value) + " " + shell
 }
 
 func formatSpaceSeparated(n *ExtendedNode, c *Config) string {

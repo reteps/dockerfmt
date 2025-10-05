@@ -40,4 +40,4 @@ RUN chmod +x /PrairieLearn/scripts/init.sh \
 
 HEALTHCHECK --interval=5m --timeout=3s \
     CMD curl -f http://localhost/ || exit 1
-CMD ["/PrairieLearn/scripts/init.sh"]
+CMD /PrairieLearn/scripts/init.sh

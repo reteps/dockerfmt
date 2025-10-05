@@ -17,6 +17,6 @@ FROM foobar
 RUN ls
 LABEL foo=bar   
 HEALTHCHECK NONE   
-CMD ["ls"]
+CMD ls
 COPY . .
 ADD . .
