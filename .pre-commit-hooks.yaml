@@ -10,7 +10,7 @@
     - --space-redirects
   description: Format Dockerfile files
   entry: dockerfmt
-  files: ^.*Dockerfile.*$
+  files: ^.*(Container|Docker)file.*$
   id: dockerfmt
   language: golang
   name: dockerfmt
