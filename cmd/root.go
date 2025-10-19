@@ -87,9 +87,11 @@ func processInput(inputName string, inputBytes []byte, config *lib.Config) (form
 		}
 		return true
 	} else if writeFlag {
-		err := os.WriteFile(inputName, []byte(formattedContent), 0644)
-		if err != nil {
-			log.Fatalf("Failed to write to file %s: %v", inputName, err)
+		if originalContent != formattedContent {
+			err := os.WriteFile(inputName, []byte(formattedContent), 0644)
+			if err != nil {
+				log.Fatalf("Failed to write to file %s: %v", inputName, err)
+			}
 		}
 	} else {
 		_, err := os.Stdout.Write([]byte(formattedContent))
