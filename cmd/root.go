@@ -22,7 +22,7 @@ var (
 var rootCmd = &cobra.Command{
 	Use:   "dockerfmt [Dockerfile...]",
 	Short: "dockerfmt is a Dockerfile and RUN step formatter.",
-	Long:  `A updated version of the dockfmt. Uses the dockerfile parser from moby/buildkit and the shell formatter from mvdan/sh.`,
+	Long:  `A updated version of the dockfmt. Uses the dockerfile parser from moby/buildkit and the shell formatter from mvdan/sh. If no Dockerfile arguments specified will process input from the stdin.`,
 	Run:   Run,
 	Args:  cobra.ArbitraryArgs,
 }
