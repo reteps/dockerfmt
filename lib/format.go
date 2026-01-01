@@ -36,6 +36,144 @@ type Config struct {
 	IndentSize      uint
 	TrailingNewline bool
 	SpaceRedirects  bool
+	MultilineMounts bool // When true, each --mount flag goes on its own line
+}
+
+// extractFlagsFormatted extracts flags from original text preserving line continuations.
+// Returns: formatted flags string, content after flags, and whether multiline was detected.
+func extractFlagsFormatted(original string, flags []string, indentSize uint) (string, string, bool) {
+	if len(flags) == 0 || original == "" {
+		return "", "", false
+	}
+
+	// Find the directive (RUN, COPY, etc.) and skip past it
+	trimmed := strings.TrimLeft(original, " \t")
+	directiveEnd := strings.IndexAny(trimmed, " \t")
+	if directiveEnd == -1 {
+		return "", "", false
+	}
+	afterDirective := trimmed[directiveEnd:]
+
+	// Check if original has line continuations between/after flags
+	hasMultiline := false
+	remaining := afterDirective
+
+	for _, flag := range flags {
+		idx := strings.Index(remaining, flag)
+		if idx == -1 {
+			return "", "", false // Flag not found, fall back to default
+		}
+		remaining = remaining[idx+len(flag):]
+
+		// Check if followed by continuation (backslash + newline)
+		spacesTrimmed := strings.TrimLeft(remaining, " \t")
+		if len(spacesTrimmed) > 0 && spacesTrimmed[0] == '\\' {
+			afterBackslash := strings.TrimLeft(spacesTrimmed[1:], " \t")
+			if len(afterBackslash) > 0 && afterBackslash[0] == '\n' {
+				hasMultiline = true
+			}
+		}
+	}
+
+	if !hasMultiline {
+		return "", "", false // No multiline formatting, use default behavior
+	}
+
+	// Build formatted flags string preserving line breaks
+	indent := strings.Repeat(" ", int(indentSize))
+	var result strings.Builder
+	remaining = afterDirective
+	prevFlagHadContinuation := false
+
+	for i, flag := range flags {
+		idx := strings.Index(remaining, flag)
+		remaining = remaining[idx+len(flag):]
+
+		if i > 0 && prevFlagHadContinuation {
+			result.WriteString(indent)
+		}
+		result.WriteString(flag)
+
+		// Check if this flag is followed by a continuation
+		spacesTrimmed := strings.TrimLeft(remaining, " \t")
+		hasContinuation := false
+		if len(spacesTrimmed) > 0 && spacesTrimmed[0] == '\\' {
+			afterBackslash := strings.TrimLeft(spacesTrimmed[1:], " \t")
+			if len(afterBackslash) > 0 && afterBackslash[0] == '\n' {
+				hasContinuation = true
+				// Skip past the backslash and newline
+				remaining = afterBackslash[1:]
+			}
+		}
+
+		if hasContinuation {
+			result.WriteString(" \\\n")
+			prevFlagHadContinuation = true
+		} else if i < len(flags)-1 {
+			// Space between flags on same line
+			result.WriteString(" ")
+			prevFlagHadContinuation = false
+		}
+	}
+
+	// Extract content after all flags, skipping any leading whitespace
+	content := strings.TrimLeft(remaining, " \t")
+
+	// Add proper separator before content
+	if prevFlagHadContinuation {
+		// Add indent after continuation
+		result.WriteString(indent)
+	} else {
+		// Just a space if no continuation
+		result.WriteString(" ")
+	}
+
+	return result.String(), content, true
+}
+
+// formatFlagsWithMountSplit formats flags, putting each --mount flag on its own line.
+// Returns the formatted flags string with trailing space/continuation ready for content.
+func formatFlagsWithMountSplit(flags []string, c *Config) string {
+	if len(flags) == 0 {
+		return ""
+	}
+
+	// Check if there are any --mount flags
+	hasMountFlags := false
+	for _, flag := range flags {
+		if strings.HasPrefix(flag, "--mount") {
+			hasMountFlags = true
+			break
+		}
+	}
+
+	if !hasMountFlags {
+		// No mount flags, just join with spaces
+		return strings.Join(flags, " ") + " "
+	}
+
+	// Format with each --mount on its own line
+	indent := strings.Repeat(" ", int(c.IndentSize))
+	var result strings.Builder
+
+	for i, flag := range flags {
+		if i > 0 {
+			// Previous flag ended with continuation, add indent
+			result.WriteString(indent)
+		}
+		result.WriteString(flag)
+
+		// Add continuation after each flag (including non-mount flags before a mount)
+		if i < len(flags)-1 {
+			result.WriteString(" \\\n")
+		} else {
+			// Last flag - add continuation before content
+			result.WriteString(" \\\n")
+			result.WriteString(indent)
+		}
+	}
+
+	return result.String()
 }
 
 func FormatNode(ast *ExtendedNode, c *Config) (string, bool) {
@@ -70,7 +208,6 @@ func FormatNode(ast *ExtendedNode, c *Config) (string, bool) {
 }
 
 func (df *ParseState) processNode(ast *ExtendedNode) {
-
 	// We don't want to process nodes that don't have a start or end line.
 	if ast.Node.StartLine == 0 || ast.Node.EndLine == 0 {
 		return
@@ -357,28 +494,39 @@ func formatShell(content string, hereDoc bool, c *Config) string {
 	}
 	return content
 }
+
 func formatRun(n *ExtendedNode, c *Config) string {
 	// Get the original RUN command text
 	hereDoc := false
 	flags := n.Node.Flags
 
 	var content string
+	var formattedFlags string
+	var hasMultilineFlags bool
+
 	if len(n.Node.Heredocs) >= 1 {
 		content = n.Node.Heredocs[0].Content
 		hereDoc = true
 		// TODO: check if doc.FileDescriptor == 0?
 	} else {
-		// We split the original multiline string by whitespace
 		originalText := n.OriginalMultiline
 		if n.OriginalMultiline == "" {
-			// If the original multiline string is empty, use the original value
 			originalText = n.Node.Original
 		}
 
-		originalTrimmed := strings.TrimLeft(originalText, " \t")
-		parts := regexp.MustCompile("[ \t]").Split(originalTrimmed, 2+len(flags))
-		content = parts[1+len(flags)]
+		// Try to extract flags with multiline formatting preserved
+		if len(flags) > 0 {
+			formattedFlags, content, hasMultilineFlags = extractFlagsFormatted(originalText, flags, c.IndentSize)
+		}
+
+		if !hasMultilineFlags {
+			// Fall back to naive whitespace splitting
+			originalTrimmed := strings.TrimLeft(originalText, " \t")
+			parts := regexp.MustCompile("[ \t]").Split(originalTrimmed, 2+len(flags))
+			content = parts[1+len(flags)]
+		}
 	}
+
 	// Try to parse as JSON
 	var jsonItems []string
 	err := json.Unmarshal([]byte(content), &jsonItems)
@@ -398,7 +546,22 @@ func formatRun(n *ExtendedNode, c *Config) string {
 	}
 
 	if len(flags) > 0 {
-		content = strings.Join(flags, " ") + " " + content
+		// Check if we should auto-split mount flags
+		hasMountFlags := false
+		for _, flag := range flags {
+			if strings.HasPrefix(flag, "--mount") {
+				hasMountFlags = true
+				break
+			}
+		}
+
+		if c.MultilineMounts && hasMountFlags {
+			content = formatFlagsWithMountSplit(flags, c) + content
+		} else if hasMultilineFlags {
+			content = formattedFlags + content
+		} else {
+			content = strings.Join(flags, " ") + " " + content
+		}
 	}
 
 	return strings.ToUpper(n.Value) + " " + content
@@ -421,6 +584,7 @@ func GetHeredoc(n *ExtendedNode) (string, bool) {
 	content := strings.Join(args, " ") + "\n" + n.Node.Heredocs[0].Content + n.Node.Heredocs[0].Name + "\n"
 	return content, true
 }
+
 func formatBasic(n *ExtendedNode, c *Config) string {
 	// Uppercases the command, and indent the following lines
 	originalTrimmed := strings.TrimLeft(n.OriginalMultiline, " \t")
@@ -478,6 +642,7 @@ func getCmd(n *ExtendedNode, shouldSplitNode bool) []string {
 func formatEntrypoint(n *ExtendedNode, c *Config) string {
 	return formatCmd(n, c)
 }
+
 func formatCmd(n *ExtendedNode, c *Config) string {
 	// Determine JSON form from parser attributes
 	isJSON, ok := n.Node.Attributes["json"]
@@ -491,14 +656,26 @@ func formatCmd(n *ExtendedNode, c *Config) string {
 	if originalText == "" {
 		originalText = n.Node.Original
 	}
-	originalTrimmed := strings.TrimLeft(originalText, " \t")
-	parts := regexp.MustCompile("[ \t]").Split(originalTrimmed, 2+len(flags))
-	if len(parts) < 1+len(flags) {
-		return strings.ToUpper(n.Value) + "\n"
-	}
+
 	var content string
-	if len(parts) >= 2+len(flags) {
-		content = parts[1+len(flags)]
+	var formattedFlags string
+	var hasMultilineFlags bool
+
+	// Try to extract flags with multiline formatting preserved
+	if len(flags) > 0 {
+		formattedFlags, content, hasMultilineFlags = extractFlagsFormatted(originalText, flags, c.IndentSize)
+	}
+
+	if !hasMultilineFlags {
+		// Fall back to naive whitespace splitting
+		originalTrimmed := strings.TrimLeft(originalText, " \t")
+		parts := regexp.MustCompile("[ \t]").Split(originalTrimmed, 2+len(flags))
+		if len(parts) < 1+len(flags) {
+			return strings.ToUpper(n.Value) + "\n"
+		}
+		if len(parts) >= 2+len(flags) {
+			content = parts[1+len(flags)]
+		}
 	}
 
 	// If JSON form (attribute or decodable), format as JSON array with spaces
@@ -519,7 +696,22 @@ func formatCmd(n *ExtendedNode, c *Config) string {
 	// Otherwise, format as shell command
 	shell := formatShell(content, false, c)
 	if len(flags) > 0 {
-		shell = strings.Join(flags, " ") + " " + shell
+		// Check if we should auto-split mount flags
+		hasMountFlags := false
+		for _, flag := range flags {
+			if strings.HasPrefix(flag, "--mount") {
+				hasMountFlags = true
+				break
+			}
+		}
+
+		if c.MultilineMounts && hasMountFlags {
+			shell = formatFlagsWithMountSplit(flags, c) + shell
+		} else if hasMultilineFlags {
+			shell = formattedFlags + shell
+		} else {
+			shell = strings.Join(flags, " ") + " " + shell
+		}
 	}
 	return strings.ToUpper(n.Node.Value) + " " + shell
 }
@@ -533,7 +725,22 @@ func formatSpaceSeparated(n *ExtendedNode, c *Config) string {
 	if !success {
 		cmd = strings.Join(getCmd(n.Next, isJSON), " ")
 		if len(n.Node.Flags) > 0 {
-			cmd = strings.Join(n.Node.Flags, " ") + " " + cmd
+			// Check if we should auto-split mount flags
+			hasMountFlags := false
+			for _, flag := range n.Node.Flags {
+				if strings.HasPrefix(flag, "--mount") {
+					hasMountFlags = true
+					break
+				}
+			}
+
+			if c.MultilineMounts && hasMountFlags {
+				cmd = formatFlagsWithMountSplit(n.Node.Flags, c) + cmd
+			} else if formatted, _, hasMultiline := extractFlagsFormatted(n.OriginalMultiline, n.Node.Flags, c.IndentSize); hasMultiline {
+				cmd = formatted + cmd
+			} else {
+				cmd = strings.Join(n.Node.Flags, " ") + " " + cmd
+			}
 		}
 		cmd += "\n"
 	}
@@ -542,7 +749,6 @@ func formatSpaceSeparated(n *ExtendedNode, c *Config) string {
 }
 
 func formatMaintainer(n *ExtendedNode, c *Config) string {
-
 	// Get text between quotes
 	maintainer := strings.Trim(n.Next.Node.Value, "\"")
 	return "LABEL org.opencontainers.image.authors=\"" + maintainer + "\"\n"
@@ -658,10 +864,15 @@ func formatBash(s string, c *Config) string {
 //
 */
 func printAST(n *ExtendedNode, indent int) {
-
 	fmt.Printf("\n%sNode: %s\n", strings.Repeat("\t", indent), n.Node.Value)
 	fmt.Printf("%sOriginal: %s\n", strings.Repeat("\t", indent), n.Node.Original)
-	fmt.Printf("%sOriginalMultiline\n%s=====\n%s%s======\n", strings.Repeat("\t", indent), strings.Repeat("\t", indent), n.OriginalMultiline, strings.Repeat("\t", indent))
+	fmt.Printf(
+		"%sOriginalMultiline\n%s=====\n%s%s======\n",
+		strings.Repeat("\t", indent),
+		strings.Repeat("\t", indent),
+		n.OriginalMultiline,
+		strings.Repeat("\t", indent),
+	)
 	fmt.Printf("%sAttributes: %v\n", strings.Repeat("\t", indent), n.Node.Attributes)
 	fmt.Printf("%sHeredocs: %v\n", strings.Repeat("\t", indent), n.Node.Heredocs)
 	// n.PrevComment
@@ -680,5 +891,4 @@ func printAST(n *ExtendedNode, indent int) {
 		fmt.Printf("\n%s!!!! Next\n%s==========\n", strings.Repeat("\t", indent), strings.Repeat("\t", indent))
 		printAST(n.Next, indent+1)
 	}
-
 }

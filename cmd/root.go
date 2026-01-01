@@ -12,11 +12,12 @@ import (
 )
 
 var (
-	writeFlag      bool
-	checkFlag      bool
-	newlineFlag    bool
-	indentSize     uint
-	spaceRedirects bool
+	writeFlag       bool
+	checkFlag       bool
+	newlineFlag     bool
+	indentSize      uint
+	spaceRedirects  bool
+	multilineMounts bool
 )
 
 var rootCmd = &cobra.Command{
@@ -32,6 +33,7 @@ func Run(cmd *cobra.Command, args []string) {
 		IndentSize:      indentSize,
 		TrailingNewline: newlineFlag,
 		SpaceRedirects:  spaceRedirects,
+		MultilineMounts: multilineMounts,
 	}
 
 	allFormatted := true
@@ -108,6 +110,7 @@ func init() {
 	rootCmd.Flags().BoolVarP(&newlineFlag, "newline", "n", false, "End the file with a trailing newline")
 	rootCmd.Flags().UintVarP(&indentSize, "indent", "i", 4, "Number of spaces to use for indentation")
 	rootCmd.Flags().BoolVarP(&spaceRedirects, "space-redirects", "s", false, "Redirect operators will be followed by a space")
+	rootCmd.Flags().BoolVarP(&multilineMounts, "multiline-mounts", "m", true, "Put each --mount flag on its own line")
 }
 
 func Execute() {
