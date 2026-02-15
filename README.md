@@ -60,6 +60,7 @@ repos:
         args:
           # optional: add additional arguments here
           - --indent=4
+          - --newline
           - --write
 ```
 
