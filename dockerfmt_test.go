@@ -21,6 +21,7 @@ func TestFormatter(t *testing.T) {
 		IndentSize:      4,
 		TrailingNewline: true,
 		SpaceRedirects:  false,
+		MultilineMounts: true,
 	}
 	for _, fileName := range matchingFiles {
 		t.Run(fileName, func(t *testing.T) {
