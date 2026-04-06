@@ -14,6 +14,8 @@ Spiritual successor to [dockfmt](https://github.com/jessfraz/dockfmt), built on 
 - [Features](#features)
 - [Installation](#installation)
 - [Usage](#usage)
+- [Configuration](#configuration)
+- [Ignoring Directives](#ignoring-directives)
 - [Pre-commit](#pre-commit)
 - [Limitations](#limitations)
 
@@ -125,6 +127,51 @@ Flags:
   -n, --newline           End the file with a trailing newline
   -s, --space-redirects   Redirect operators will be followed by a space
   -w, --write             Write the formatted output back to the file(s)
+```
+
+## Configuration
+
+### EditorConfig
+
+dockerfmt reads [EditorConfig](https://editorconfig.org/) files to pick up project-level formatting defaults. The following properties are supported:
+
+| EditorConfig property    | dockerfmt equivalent | Notes                       |
+| ------------------------ | -------------------- | --------------------------- |
+| `indent_size`            | `--indent`           | Standard EditorConfig key   |
+| `insert_final_newline`   | `--newline`          | Standard EditorConfig key   |
+| `space_redirects`        | `--space-redirects`  | Custom key (non-standard)   |
+
+CLI flags always take precedence over EditorConfig values.
+
+Example `.editorconfig`:
+
+```ini
+[Dockerfile]
+indent_size = 2
+insert_final_newline = true
+```
+
+> **Note:** EditorConfig is only applied when formatting files by path.
+> It is not used when reading from stdin, since there is no file path to resolve against.
+
+## Ignoring Directives
+
+To skip formatting for a specific directive, place a `# dockerfmt-ignore` comment on the line immediately before it:
+
+```dockerfile
+# dockerfmt-ignore
+RUN   echo   "this stays exactly as-is"
+RUN echo "this gets formatted normally"
+```
+
+The ignore comment applies only to the next directive. This is useful as an escape hatch for cases where the formatter produces unwanted output, such as command grouping or unescaped semicolons:
+
+```dockerfile
+# dockerfmt-ignore
+RUN { echo hello && echo world; }
+
+# dockerfmt-ignore
+RUN echo hello; echo world
 ```
 
 ## Pre-commit

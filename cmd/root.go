@@ -5,8 +5,10 @@ import (
 	"io"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 
+	"github.com/editorconfig/editorconfig-core-go/v2"
 	"github.com/reteps/dockerfmt/lib"
 	"github.com/spf13/cobra"
 )
@@ -62,7 +64,8 @@ func Run(cmd *cobra.Command, args []string) {
 				log.Fatalf("Failed to read file %s: %v", fileName, err)
 			}
 
-			if !processInput(fileName, inputBytes, config) {
+			fileConfig := applyEditorConfig(config, fileName, cmd)
+			if !processInput(fileName, inputBytes, fileConfig) {
 				allFormatted = false
 			}
 		}
@@ -72,6 +75,41 @@ func Run(cmd *cobra.Command, args []string) {
 	if checkFlag && !allFormatted {
 		os.Exit(1)
 	}
+}
+
+// applyEditorConfig returns a Config with editorconfig properties applied for
+// the given file path. Explicitly-set CLI flags take precedence.
+func applyEditorConfig(base *lib.Config, filePath string, cmd *cobra.Command) *lib.Config {
+	def, err := editorconfig.GetDefinitionForFilename(filePath)
+	if err != nil {
+		return base
+	}
+
+	// Start from a copy of the base config (which has CLI defaults/flags).
+	c := *base
+
+	// indent_size — only apply if the CLI flag was not explicitly set.
+	if !cmd.Flags().Changed("indent") && def.IndentSize != "" {
+		if n, err := strconv.Atoi(def.IndentSize); err == nil && n > 0 {
+			c.IndentSize = uint(n)
+		}
+	}
+
+	// insert_final_newline — only apply if the CLI flag was not explicitly set.
+	if !cmd.Flags().Changed("newline") && def.InsertFinalNewline != nil {
+		c.TrailingNewline = *def.InsertFinalNewline
+	}
+
+	// space_redirects — dockerfmt-specific property, not a standard editorconfig key.
+	if !cmd.Flags().Changed("space-redirects") {
+		if v, ok := def.Raw["space_redirects"]; ok {
+			if b, err := strconv.ParseBool(v); err == nil {
+				c.SpaceRedirects = b
+			}
+		}
+	}
+
+	return &c
 }
 
 func processInput(inputName string, inputBytes []byte, config *lib.Config) (formatted bool) {

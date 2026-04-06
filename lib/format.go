@@ -45,6 +45,16 @@ type Config struct {
 	SpaceRedirects  bool
 }
 
+// hasIgnoreComment reports whether any line in the block is a "# dockerfmt-ignore" comment.
+func hasIgnoreComment(lines []string) bool {
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "# dockerfmt-ignore" {
+			return true
+		}
+	}
+	return false
+}
+
 // directive returns the uppercased directive name (e.g. "RUN", "COPY").
 func (n *ExtendedNode) directive() string {
 	return strings.ToUpper(n.Value)
@@ -161,13 +171,19 @@ func (df *ParseState) processNode(ast *ExtendedNode) {
 	}
 
 	// Collect any comments between the current line and this node.
+	ignored := false
 	if df.CurrentLine != ast.StartLine {
-		df.Output += FormatComments(df.AllOriginalLines[df.CurrentLine : ast.StartLine-1])
+		commentLines := df.AllOriginalLines[df.CurrentLine : ast.StartLine-1]
+		df.Output += FormatComments(commentLines)
+		ignored = hasIgnoreComment(commentLines)
 		df.CurrentLine = ast.StartLine
 	}
 
-	output, ok := FormatNode(ast, df.Config)
-	if ok {
+	if ignored {
+		// # dockerfmt-ignore: emit the directive verbatim.
+		df.Output += ast.OriginalMultiline
+		df.CurrentLine = ast.EndLine
+	} else if output, ok := FormatNode(ast, df.Config); ok {
 		df.Output += output
 		df.CurrentLine = ast.EndLine
 	}

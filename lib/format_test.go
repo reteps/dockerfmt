@@ -551,3 +551,38 @@ func TestFormatNodeUnknownCommand(t *testing.T) {
 	assert.False(t, ok)
 	assert.Equal(t, "", output)
 }
+
+// --- hasIgnoreComment ---
+
+func TestHasIgnoreComment(t *testing.T) {
+	tests := []struct {
+		name     string
+		lines    []string
+		expected bool
+	}{
+		{"exact match", []string{"# dockerfmt-ignore\n"}, true},
+		{"with leading spaces", []string{"  # dockerfmt-ignore\n"}, true},
+		{"with tab", []string{"\t# dockerfmt-ignore\n"}, true},
+		{"no newline", []string{"# dockerfmt-ignore"}, true},
+		{"among other comments", []string{"# a comment\n", "# dockerfmt-ignore\n"}, true},
+		{"not present", []string{"# a comment\n", "# another\n"}, false},
+		{"partial match", []string{"# dockerfmt-ignore this\n"}, false},
+		{"empty", []string{}, false},
+		{"blank lines only", []string{"\n", "\n"}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, hasIgnoreComment(tt.lines))
+		})
+	}
+}
+
+// --- dockerfmt-ignore integration ---
+
+func TestIgnoreDirective(t *testing.T) {
+	input := strings.SplitAfter("FROM    scratch\n# dockerfmt-ignore\nRUN   echo   hello\nRUN   echo   world\n", "\n")
+	output := FormatFileLines(input, defaultConfig)
+	expected := "FROM scratch\n# dockerfmt-ignore\nRUN   echo   hello\nRUN echo world\n"
+	assert.Equal(t, expected, output)
+}
