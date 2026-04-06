@@ -3,7 +3,11 @@
   "version": "0.3.6",
   "type": "module",
   "description": "",
-  "repository": "git+https://github.com/reteps/dockerfmt/tree/main/js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/reteps/dockerfmt.git",
+    "directory": "js"
+  },
   "author": "Peter Stenger <pete@stenger.io>",
   "license": "MIT",
   "engines": {
