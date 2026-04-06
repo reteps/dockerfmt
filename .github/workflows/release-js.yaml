@@ -12,13 +12,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22.x'
+          node-version: '24.x'
       - name: Set version from tag and publish
         run: |
           cd js
           VERSION=${GITHUB_REF_NAME#v}
           npm --no-git-tag-version version "${VERSION}"
-          npm install -g npm@latest
           npm ci
           npm run build-js
           npm publish --provenance --access public
