@@ -6,3 +6,6 @@ RUN --security echo "test"
 COPY --chown=my-user:my-group --chmod=644 ./config.conf /data/config.conf
 COPY --link ./another-file /data/linked-file
 ADD --keep-git-dir ./ /data/src
+RUN --mount=type=bind,source=requirements.lock,target=requirements.lock \
+  --mount=type=ssh \
+  pip install -r requirements.lock

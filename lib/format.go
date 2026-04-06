@@ -52,11 +52,32 @@ func (n *ExtendedNode) directive() string {
 }
 
 // prependFlags prepends flags (e.g. "--network=host") to content if any exist.
-func prependFlags(flags []string, content string) string {
-	if len(flags) > 0 {
-		return strings.Join(flags, " ") + " " + content
+// When any flag starts with "--mount", each flag is placed on its own continuation line.
+func prependFlags(flags []string, content string, c *Config) string {
+	if len(flags) == 0 {
+		return content
 	}
-	return content
+	if hasMountFlag(flags) {
+		indent := strings.Repeat(" ", int(c.IndentSize))
+		var b strings.Builder
+		for _, flag := range flags {
+			b.WriteString(flag)
+			b.WriteString(" \\\n")
+			b.WriteString(indent)
+		}
+		b.WriteString(content)
+		return b.String()
+	}
+	return strings.Join(flags, " ") + " " + content
+}
+
+func hasMountFlag(flags []string) bool {
+	for _, f := range flags {
+		if strings.HasPrefix(f, "--mount") {
+			return true
+		}
+	}
+	return false
 }
 
 // extractDirectiveContent returns the text after the directive keyword and any flags.
@@ -67,11 +88,37 @@ func extractDirectiveContent(n *ExtendedNode, flagCount int) (string, bool) {
 		originalText = n.Original
 	}
 	originalTrimmed := strings.TrimLeft(originalText, " \t")
-	parts := reWhitespace.Split(originalTrimmed, 2+flagCount)
-	if len(parts) < 2+flagCount {
+
+	if flagCount > 0 {
+		// When flags span multiple lines with line continuations, a simple
+		// whitespace split can't reliably skip them. Instead, find the last
+		// flag in the original text and return everything after it.
+		lastFlag := n.Flags[flagCount-1]
+		idx := strings.LastIndex(originalTrimmed, lastFlag)
+		if idx == -1 {
+			return "", false
+		}
+		rest := originalTrimmed[idx+len(lastFlag):]
+		// Skip whitespace and line continuations to reach content.
+		for {
+			rest = strings.TrimLeft(rest, " \t")
+			if strings.HasPrefix(rest, "\\\n") {
+				rest = rest[2:]
+				continue
+			}
+			break
+		}
+		if rest == "" {
+			return "", false
+		}
+		return rest, true
+	}
+
+	parts := reWhitespace.Split(originalTrimmed, 2)
+	if len(parts) < 2 {
 		return "", false
 	}
-	return parts[1+flagCount], true
+	return parts[1], true
 }
 
 // marshalJSONArray formats a string slice as a JSON array with spaces after commas.
@@ -260,36 +307,33 @@ func formatShell(content string, hereDoc bool, c *Config) string {
 
 // preprocessShellComments wraps shell comments in backtick placeholders so they
 // survive shfmt formatting. The placeholder format is `# text#`\, which shfmt
-// treats as a command substitution. Backticks inside comments are escaped as ×
-// to avoid nesting issues (restored in postprocess).
+// treats as a command substitution. Backticks inside comments are backslash-escaped
+// (\`) to nest safely inside the outer backtick delimiters (restored in postprocess).
 //
 // Additionally, when a comment sits between && commands:
-//   cmd1 \
-//       # comment
-//       && cmd2
+//
+//	cmd1 \
+//	    # comment
+//	    && cmd2
+//
 // the && is moved before the comment block so shfmt sees a continuous chain,
 // and placeholders inside chains get && attached so shfmt doesn't break them apart.
 func preprocessShellComments(content string) string {
 	content = StripWhitespace(content, true)
 	lines := strings.SplitAfter(content, "\n")
 
-	// Single pass: wrap comments as placeholders, then move && before comment
-	// blocks, then attach && to placeholders inside continuation chains.
-	//
-	// We do this in three steps over the same line array to avoid redundant
-	// split/join cycles, but the logic mirrors the original three-phase approach.
-
 	// Step 1: wrap comment lines as backtick placeholders.
+	// Format: `# comment text#`\  — shfmt treats this as a command substitution.
 	for i, line := range lines {
 		trimmed := strings.TrimLeft(line, " \t")
 		if len(trimmed) == 0 || trimmed[0] != '#' {
 			continue
 		}
-		// Escape backticks inside comments to avoid nesting.
-		line = strings.ReplaceAll(line, "`", "×")
-		trimmed = strings.TrimLeft(line, " \t")
 		ws := line[:len(line)-len(trimmed)]
 		comment := strings.TrimRight(trimmed, " \t\n")
+		// Escape backticks so they nest safely inside the backtick placeholder.
+		// Inside backtick command substitutions, \` represents a literal backtick.
+		comment = strings.ReplaceAll(comment, "`", "\\`")
 		nl := ""
 		if line[len(line)-1] == '\n' {
 			nl = "\n"
@@ -300,30 +344,24 @@ func preprocessShellComments(content string) string {
 	// Step 2: move && before comment blocks.
 	// When we see:  code \<nl> placeholder(s) <nl> && cmd
 	// transform to: code &&\<nl> placeholder(s) <nl> cmd
-	// This is equivalent to the reCommentContinuation regex but explicit.
 	content = strings.Join(lines, "")
 	content = reCommentContinuation.ReplaceAllString(content, "&&$1$2")
 	lines = strings.SplitAfter(content, "\n")
 
-	// Step 3: attach && to placeholders that are inside an && chain.
-	// This ensures shfmt keeps them as part of the continuation.
+	// Step 3: attach && to placeholders inside && chains so shfmt keeps them
+	// as part of the continuation.
 	inChain := false
 	for i, line := range lines {
 		trimmed := strings.Trim(line, " \t\\\n")
-		isPlaceholder := len(trimmed) >= 2 && trimmed[0] == '`' && trimmed[1] == '#'
 
-		if isPlaceholder {
+		if strings.HasPrefix(trimmed, "`#") {
 			if inChain {
 				lines[i] = strings.Replace(lines[i], "#`\\", "#`&&\\", 1)
 			}
 			continue
 		}
 
-		if len(trimmed) >= 2 && trimmed[len(trimmed)-2:] == "&&" {
-			inChain = true
-		} else {
-			inChain = false
-		}
+		inChain = strings.HasSuffix(trimmed, "&&")
 	}
 
 	return strings.Join(lines, "")
@@ -332,17 +370,19 @@ func preprocessShellComments(content string) string {
 // postprocessShellComments restores backtick placeholders to real comments and
 // fixes up their indentation to align with the surrounding code.
 func postprocessShellComments(content string, c *Config) string {
-	// Step 1: unwrap placeholders. A placeholder after shfmt looks like:
+	// Unwrap placeholders. A placeholder after shfmt looks like:
 	//   <ws><optional && >`# text#` \
 	// The reBacktickComment regex captures the whitespace and comment text.
 	content = reBacktickComment.ReplaceAllString(content, "$1$2")
 
-	// Step 2: single pass to fix comment indentation and detect leading comments.
+	// Single pass to fix comment indentation, restore escaped backticks,
+	// and detect leading comments.
 	lines := strings.SplitAfter(content, "\n")
 	indent := strings.Repeat(" ", int(c.IndentSize))
 	prevIsComment := false
 	prevCommentSpacing := ""
 	firstLineIsComment := false
+
 	for i, line := range lines {
 		trimmed := strings.TrimLeft(line, " \t")
 		if len(trimmed) == 0 || trimmed[0] != '#' {
@@ -350,19 +390,22 @@ func postprocessShellComments(content string, c *Config) string {
 			continue
 		}
 
-		// First line being a comment means the directive would merge with it
-		// (e.g. "RUN # comment"). We'll handle this after the loop.
+		ws := line[:len(line)-len(trimmed)]
+		// Restore backticks that were escaped for the backtick placeholder.
+		trimmed = strings.ReplaceAll(trimmed, "\\`", "`")
+
 		if i == 0 {
+			// First line being a comment means the directive would merge with it
+			// (e.g. "RUN # comment"). We'll insert a continuation before it after the loop.
 			firstLineIsComment = true
 			lines[i] = indent + trimmed
-		}
-
-		// Consecutive comments share the indentation of the first in the group.
-		ws := lines[i][:len(lines[i])-len(strings.TrimLeft(lines[i], " \t"))]
-		if prevIsComment {
-			lines[i] = prevCommentSpacing + strings.TrimLeft(lines[i], " \t")
+			prevCommentSpacing = indent
+		} else if prevIsComment {
+			// Consecutive comments share the indentation of the first in the group.
+			lines[i] = prevCommentSpacing + trimmed
 		} else {
 			prevCommentSpacing = ws
+			lines[i] = ws + trimmed
 		}
 		prevIsComment = true
 	}
@@ -371,9 +414,7 @@ func postprocessShellComments(content string, c *Config) string {
 		lines = slices.Insert(lines, 0, "\\\n")
 	}
 
-	content = strings.Join(lines, "")
-	content = strings.ReplaceAll(content, "×", "`")
-	return content
+	return strings.Join(lines, "")
 }
 
 func formatRun(n *ExtendedNode, c *Config) string {
@@ -403,7 +444,7 @@ func formatRun(n *ExtendedNode, c *Config) string {
 		}
 	}
 
-	return n.directive() + " " + prependFlags(flags, content)
+	return n.directive() + " " + prependFlags(flags, content, c)
 }
 
 func GetHeredoc(n *ExtendedNode) (string, bool) {
@@ -495,14 +536,14 @@ func formatCmd(n *ExtendedNode, c *Config) string {
 
 	// Otherwise, format as shell command
 	shell := formatShell(content, false, c)
-	return n.directive() + " " + prependFlags(flags, shell)
+	return n.directive() + " " + prependFlags(flags, shell, c)
 }
 
 func formatSpaceSeparated(n *ExtendedNode, c *Config) string {
 	isJSON := n.Attributes["json"]
 	cmd, success := GetHeredoc(n)
 	if !success {
-		cmd = prependFlags(n.Flags, strings.Join(getCmd(n.Next, isJSON), " ")) + "\n"
+		cmd = prependFlags(n.Flags, strings.Join(getCmd(n.Next, isJSON), " "), c) + "\n"
 	}
 
 	return n.directive() + " " + cmd
