@@ -10,9 +10,6 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
-
-      # - name: Install tinygo
-      # Until 0.38.0 release, I won't rebuild the tinygo binary
       - uses: actions/setup-node@v4
         with:
           node-version: '20.x'
@@ -25,5 +22,3 @@ jobs:
           npm ci
           npm run build-js
           npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
