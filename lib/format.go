@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"regexp"
@@ -15,6 +14,15 @@ import (
 	"github.com/moby/buildkit/frontend/dockerfile/command"
 	"github.com/moby/buildkit/frontend/dockerfile/parser"
 	"mvdan.cc/sh/v3/syntax"
+)
+
+var (
+	reWhitespace          = regexp.MustCompile(`[ \t]`)
+	reLeadingSpaces       = regexp.MustCompile(`(?m)^ *`)
+	reUnescapedSemicolon  = regexp.MustCompile(`[^\\];`)
+	reCommentContinuation = regexp.MustCompile(`(\\(?:\s*` + "`#.*#`" + `\\){1,}\s*)&&(.[^\\])`)
+	reBacktickComment     = regexp.MustCompile(`([ \t]*)(?:&& )?` + "`(#.*)#` " + `\\`)
+	reMultipleNewlines    = regexp.MustCompile(`\n{3,}`)
 )
 
 type ExtendedNode struct {
@@ -38,19 +46,104 @@ type Config struct {
 	SpaceRedirects  bool
 }
 
-func FormatNode(ast *ExtendedNode, c *Config) (string, bool) {
-	nodeName := strings.ToLower(ast.Node.Value)
-	dispatch := map[string]func(*ExtendedNode, *Config) string{
+// directive returns the uppercased directive name (e.g. "RUN", "COPY").
+func (n *ExtendedNode) directive() string {
+	return strings.ToUpper(n.Value)
+}
+
+// prependFlags prepends flags (e.g. "--network=host") to content if any exist.
+// When any flag starts with "--mount", each flag is placed on its own continuation line.
+func prependFlags(flags []string, content string, c *Config) string {
+	if len(flags) == 0 {
+		return content
+	}
+	if hasMountFlag(flags) {
+		indent := strings.Repeat(" ", int(c.IndentSize))
+		var b strings.Builder
+		for _, flag := range flags {
+			b.WriteString(flag)
+			b.WriteString(" \\\n")
+			b.WriteString(indent)
+		}
+		b.WriteString(content)
+		return b.String()
+	}
+	return strings.Join(flags, " ") + " " + content
+}
+
+func hasMountFlag(flags []string) bool {
+	for _, f := range flags {
+		if strings.HasPrefix(f, "--mount") {
+			return true
+		}
+	}
+	return false
+}
+
+// extractDirectiveContent returns the text after the directive keyword and any flags.
+// Returns ("", false) if there isn't enough content after the keyword.
+func extractDirectiveContent(n *ExtendedNode, flagCount int) (string, bool) {
+	originalText := n.OriginalMultiline
+	if originalText == "" {
+		originalText = n.Original
+	}
+	originalTrimmed := strings.TrimLeft(originalText, " \t")
+
+	if flagCount > 0 {
+		// When flags span multiple lines with line continuations, a simple
+		// whitespace split can't reliably skip them. Instead, find the last
+		// flag in the original text and return everything after it.
+		lastFlag := n.Flags[flagCount-1]
+		idx := strings.LastIndex(originalTrimmed, lastFlag)
+		if idx == -1 {
+			return "", false
+		}
+		rest := originalTrimmed[idx+len(lastFlag):]
+		// Skip whitespace and line continuations to reach content.
+		for {
+			rest = strings.TrimLeft(rest, " \t")
+			if strings.HasPrefix(rest, "\\\n") {
+				rest = rest[2:]
+				continue
+			}
+			break
+		}
+		if rest == "" {
+			return "", false
+		}
+		return rest, true
+	}
+
+	parts := reWhitespace.Split(originalTrimmed, 2)
+	if len(parts) < 2 {
+		return "", false
+	}
+	return parts[1], true
+}
+
+// marshalJSONArray formats a string slice as a JSON array with spaces after commas.
+func marshalJSONArray(items []string) (string, error) {
+	b, err := Marshal(items)
+	if err != nil {
+		return "", err
+	}
+	return strings.ReplaceAll(string(b), "\",\"", "\", \""), nil
+}
+
+var nodeFormatters map[string]func(*ExtendedNode, *Config) string
+
+func init() {
+	nodeFormatters = map[string]func(*ExtendedNode, *Config) string{
 		command.Add:         formatSpaceSeparated,
 		command.Arg:         formatBasic,
 		command.Cmd:         formatCmd,
 		command.Copy:        formatSpaceSeparated,
-		command.Entrypoint:  formatEntrypoint,
+		command.Entrypoint:  formatCmd,
 		command.Env:         formatEnv,
 		command.Expose:      formatSpaceSeparated,
 		command.From:        formatSpaceSeparated,
 		command.Healthcheck: formatBasic,
-		command.Label:       formatBasic, // TODO: order labels?
+		command.Label:       formatBasic,
 		command.Maintainer:  formatMaintainer,
 		command.Onbuild:     FormatOnBuild,
 		command.Run:         formatRun,
@@ -60,62 +153,48 @@ func FormatNode(ast *ExtendedNode, c *Config) (string, bool) {
 		command.Volume:      formatBasic,
 		command.Workdir:     formatSpaceSeparated,
 	}
+}
 
-	fmtFunc := dispatch[nodeName]
+func FormatNode(ast *ExtendedNode, c *Config) (string, bool) {
+	nodeName := strings.ToLower(ast.Value)
+	fmtFunc := nodeFormatters[nodeName]
 	if fmtFunc == nil {
 		return "", false
-		// log.Fatalf("Unknown command: %s %s\n", nodeName, ast.OriginalMultiline)
 	}
 	return fmtFunc(ast, c), true
 }
 
 func (df *ParseState) processNode(ast *ExtendedNode) {
-
-	// We don't want to process nodes that don't have a start or end line.
-	if ast.Node.StartLine == 0 || ast.Node.EndLine == 0 {
+	if ast.StartLine == 0 || ast.EndLine == 0 {
 		return
 	}
 
-	// check if we are on the correct line,
-	// otherwise get the comments we are missing
+	// Collect any comments between the current line and this node.
 	if df.CurrentLine != ast.StartLine {
 		df.Output += FormatComments(df.AllOriginalLines[df.CurrentLine : ast.StartLine-1])
 		df.CurrentLine = ast.StartLine
 	}
-	// if df.Output != "" {
-	// 	// If the previous line isn't a comment or newline, add a newline
-	// 	lastTwoChars := df.Output[len(df.Output)-2 : len(df.Output)]
-	// 	lastNonTrailingNewline := strings.LastIndex(strings.TrimRight(df.Output, "\n"), "\n")
-	// 	if lastTwoChars != "\n\n" && df.Output[lastNonTrailingNewline+1] != '#' {
-	// 		df.Output += "\n"
-	// 	}
-	// }
 
 	output, ok := FormatNode(ast, df.Config)
 	if ok {
 		df.Output += output
 		df.CurrentLine = ast.EndLine
 	}
-	// fmt.Printf("CurrentLine: %d, %d\n", df.CurrentLine, ast.EndLine)
-	// fmt.Printf("Unknown command: %s %s\n", nodeName, ast.OriginalMultiline)
 
 	for _, child := range ast.Children {
 		df.processNode(child)
 	}
 
-	// fmt.Printf("CurrentLine2: %d, %d\n", df.CurrentLine, ast.EndLine)
-
-	if ast.Node.Next != nil {
+	if ast.Node.Next != nil { // Must use .Node.Next (parser.Node), not .Next (ExtendedNode)
 		df.processNode(ast.Next)
 	}
 }
 
 func FormatOnBuild(n *ExtendedNode, c *Config) string {
 	if len(n.Node.Next.Children) == 1 {
-		// fmt.Printf("Onbuild: %s\n", n.Node.Next.Children[0].Value)
 		output, ok := FormatNode(n.Next.Children[0], c)
 		if ok {
-			return strings.ToUpper(n.Node.Value) + " " + output
+			return n.directive() + " " + output
 		}
 	}
 
@@ -130,72 +209,51 @@ func FormatFileLines(fileLines []string, c *Config) string {
 	}
 
 	parseState := &ParseState{
-		CurrentLine:      0,
-		Output:           "",
 		AllOriginalLines: fileLines,
+		Config:           c,
 	}
 	rootNode := BuildExtendedNode(result.AST, fileLines)
-	parseState.Config = c
 	parseState.processNode(rootNode)
 
-	// After all directives are processed, we need to check if we have any trailing comments to add.
+	// Append any trailing comments after the last directive.
 	if parseState.CurrentLine < len(parseState.AllOriginalLines) {
-		// Add the rest of the file
 		parseState.Output += FormatComments(parseState.AllOriginalLines[parseState.CurrentLine:])
 	}
 
 	parseState.Output = strings.TrimRight(parseState.Output, "\n")
-	// Ensure the output ends with a newline if requested
 	if c.TrailingNewline {
 		parseState.Output += "\n"
 	}
 	return parseState.Output
 }
 
+// BuildExtendedNode wraps a parser.Node tree, attaching the original multiline
+// text from fileLines to each node for use during formatting.
 func BuildExtendedNode(n *parser.Node, fileLines []string) *ExtendedNode {
-	// Build an extended node from the parser node
-	// This is used to add the original multiline string to the node
-	// and to add the original line numbers
-
 	if n == nil {
 		return nil
 	}
 
-	// Create the extended node with the current parser node
-	en := &ExtendedNode{
-		Node:              n,
-		Next:              nil,
-		Children:          nil,
-		OriginalMultiline: "", // Default to empty string
-	}
+	en := &ExtendedNode{Node: n}
 
-	// If we have valid start and end lines, construct the multiline representation
+	// Reconstruct the original text (StartLine is 1-indexed, fileLines is 0-indexed)
 	if n.StartLine > 0 && n.EndLine > 0 {
-		// Subtract 1 from StartLine because fileLines is 0-indexed while StartLine is 1-indexed
 		for i := n.StartLine - 1; i < n.EndLine; i++ {
 			en.OriginalMultiline += fileLines[i]
 		}
 	}
 
-	// Process all children recursively
 	if len(n.Children) > 0 {
-		childrenNodes := make([]*ExtendedNode, 0, len(n.Children))
+		en.Children = make([]*ExtendedNode, 0, len(n.Children))
 		for _, child := range n.Children {
-			extChild := BuildExtendedNode(child, fileLines)
-			if extChild != nil {
-				childrenNodes = append(childrenNodes, extChild)
+			if extChild := BuildExtendedNode(child, fileLines); extChild != nil {
+				en.Children = append(en.Children, extChild)
 			}
 		}
-		// Replace the children with the processed ones
-		en.Children = childrenNodes
 	}
 
-	// Process the next node recursively
 	if n.Next != nil {
-		extNext := BuildExtendedNode(n.Next, fileLines)
-		if extNext != nil {
-			en.Next = extNext
-		}
+		en.Next = BuildExtendedNode(n.Next, fileLines)
 	}
 
 	return en
@@ -204,33 +262,28 @@ func BuildExtendedNode(n *parser.Node, fileLines []string) *ExtendedNode {
 func formatEnv(n *ExtendedNode, c *Config) string {
 	// Handle missing arguments safely
 	if n.Next == nil {
-		return strings.ToUpper(n.Node.Value)
+		return n.directive()
 	}
 
 	// Only the legacy format will have an empty 3rd child
 	if n.Next.Next.Next.Value == "" {
-		return strings.ToUpper(n.Node.Value) + " " + n.Next.Node.Value + "=" + n.Next.Next.Node.Value + "\n"
+		return n.directive() + " " + n.Next.Value + "=" + n.Next.Next.Value + "\n"
 	}
 
 	// Otherwise, we have a valid env command; fall back to original if parsing fails
-	originalTrimmed := strings.TrimLeft(n.OriginalMultiline, " \t")
-	parts := regexp.MustCompile("[ \t]").Split(originalTrimmed, 2)
-	if len(parts) < 2 {
+	rawContent, ok := extractDirectiveContent(n, 0)
+	if !ok {
 		return n.OriginalMultiline
 	}
-	content := StripWhitespace(parts[1], true)
+	content := StripWhitespace(rawContent, true)
 	// Indent all lines with indentSize spaces
-	re := regexp.MustCompile("(?m)^ *")
-	content = strings.Trim(re.ReplaceAllString(content, strings.Repeat(" ", int(c.IndentSize))), " ")
-	return strings.ToUpper(n.Value) + " " + content
+	content = strings.Trim(reLeadingSpaces.ReplaceAllString(content, strings.Repeat(" ", int(c.IndentSize))), " ")
+	return n.directive() + " " + content
 }
 
 func formatShell(content string, hereDoc bool, c *Config) string {
-	// Semicolons require special handling so we don't break the command
 	// TODO: support semicolons in commands
-
-	// check for [^\;]
-	if regexp.MustCompile(`[^\\];`).MatchString(content) {
+	if reUnescapedSemicolon.MatchString(content) {
 		return content
 	}
 	// Grouped expressions aren't formatted well
@@ -240,201 +293,186 @@ func formatShell(content string, hereDoc bool, c *Config) string {
 	}
 
 	if !hereDoc {
-		// Here lies some cursed magic. Be careful.
-
-		// Replace comments with a subshell evaluation -- they won't be run so we can do this.
-		content = StripWhitespace(content, true)
-		lineComment := regexp.MustCompile(`(\n\s*)(#.*)`)
-		lines := strings.SplitAfter(content, "\n")
-		for i := range lines {
-			lineTrim := strings.TrimLeft(lines[i], " \t")
-			if len(lineTrim) >= 1 && lineTrim[0] == '#' {
-				lines[i] = strings.ReplaceAll(lines[i], "`", "×")
-			}
-		}
-		content = strings.Join(lines, "")
-
-		content = lineComment.ReplaceAllString(content, "$1`$2#`\\")
-		// fmt.Printf("Content-1: %s\n", content)
-
-		/*
-			```
-			foo \
-			`#comment#`\
-			&& bar
-			```
-
-			```
-			foo && \
-			`#comment#` \
-			bar
-			```
-		*/
-
-		// The (.[^\\]) prevents an edge case with '&& \'. See tests/in/andissue.dockerfile
-		commentContinuation := regexp.MustCompile(`(\\(?:\s*` + "`#.*#`" + `\\){1,}\s*)&&(.[^\\])`)
-		content = commentContinuation.ReplaceAllString(content, "&&$1$2")
-
-		// fmt.Printf("Content0: %s\n", content)
-		lines = strings.SplitAfter(content, "\n")
-		/**
-		if the next line is not a comment, and we didn't start with a continuation, don't add the `&&`.
-		*/
-		inContinuation := false
-		for i := range lines {
-			lineTrim := strings.Trim(lines[i], " \t\\\n")
-			// fmt.Printf("LineTrim: %s\n", lineTrim)
-			nextLine := ""
-			isComment := false
-			nextLineIsComment := false
-			if i+1 < len(lines) {
-				nextLine = strings.Trim(lines[i+1], " \t\\\n")
-			}
-			if len(nextLine) >= 2 && nextLine[:2] == "`#" {
-				nextLineIsComment = true
-			}
-			if len(lineTrim) >= 2 && lineTrim[:2] == "`#" {
-				isComment = true
-			}
-
-			// fmt.Printf("isComment: %v, nextLineIsComment: %v, inContinuation: %v\n", isComment, nextLineIsComment, inContinuation)
-			if isComment && (inContinuation || nextLineIsComment) {
-				lines[i] = strings.Replace(lines[i], "#`\\", "#`&&\\", 1)
-			}
-
-			if len(lineTrim) >= 2 && !isComment && lineTrim[len(lineTrim)-2:] == "&&" {
-				inContinuation = true
-			} else if !isComment {
-				inContinuation = false
-			}
-		}
-
-		content = strings.Join(lines, "")
+		content = preprocessShellComments(content)
 	}
 
-	// Now that we have a valid bash-style command, we can format it with shfmt
-	// log.Printf("Content1: %s\n", content)
 	content = formatBash(content, c)
 
-	// log.Printf("Content2: %s\n", content)
-
 	if !hereDoc {
-		reBacktickComment := regexp.MustCompile(`([ \t]*)(?:&& )?` + "`(#.*)#` " + `\\`)
-		content = reBacktickComment.ReplaceAllString(content, "$1$2")
-
-		// Fixup the comment indentation
-		lines := strings.SplitAfter(content, "\n")
-		prevIsComment := false
-		prevCommentSpacing := ""
-		firstLineIsComment := false
-		for i := range lines {
-			lineTrim := strings.TrimLeft(lines[i], " \t")
-			// fmt.Printf("LineTrim: %s, %v\n", lineTrim, prevIsComment)
-			if len(lineTrim) >= 1 && lineTrim[0] == '#' {
-				if i == 0 {
-					firstLineIsComment = true
-					lines[i] = strings.Repeat(" ", int(c.IndentSize)) + lineTrim
-				}
-				lineParts := strings.SplitN(lines[i], "#", 2)
-
-				if prevIsComment {
-					lines[i] = prevCommentSpacing + "#" + lineParts[1]
-				} else {
-					prevCommentSpacing = lineParts[0]
-				}
-				prevIsComment = true
-			} else {
-				prevIsComment = false
-			}
-		}
-		// TODO: this formatting isn't perfect (see tests/out/run5.dockerfile)
-		if firstLineIsComment {
-			lines = slices.Insert(lines, 0, "\\\n")
-		}
-		content = strings.Join(lines, "")
-		content = strings.ReplaceAll(content, "×", "`")
-
+		content = postprocessShellComments(content, c)
 	}
+
 	return content
 }
-func formatRun(n *ExtendedNode, c *Config) string {
-	// Get the original RUN command text
-	hereDoc := false
-	flags := n.Node.Flags
 
-	var content string
-	if len(n.Node.Heredocs) >= 1 {
-		content = n.Node.Heredocs[0].Content
-		hereDoc = true
-		// TODO: check if doc.FileDescriptor == 0?
-	} else {
-		// We split the original multiline string by whitespace
-		originalText := n.OriginalMultiline
-		if n.OriginalMultiline == "" {
-			// If the original multiline string is empty, use the original value
-			originalText = n.Node.Original
+// preprocessShellComments wraps shell comments in backtick placeholders so they
+// survive shfmt formatting. The placeholder format is `# text#`\, which shfmt
+// treats as a command substitution. Backticks inside comments are backslash-escaped
+// (\`) to nest safely inside the outer backtick delimiters (restored in postprocess).
+//
+// Additionally, when a comment sits between && commands:
+//
+//	cmd1 \
+//	    # comment
+//	    && cmd2
+//
+// the && is moved before the comment block so shfmt sees a continuous chain,
+// and placeholders inside chains get && attached so shfmt doesn't break them apart.
+func preprocessShellComments(content string) string {
+	content = StripWhitespace(content, true)
+	lines := strings.SplitAfter(content, "\n")
+
+	// Step 1: wrap comment lines as backtick placeholders.
+	// Format: `# comment text#`\  — shfmt treats this as a command substitution.
+	for i, line := range lines {
+		trimmed := strings.TrimLeft(line, " \t")
+		if len(trimmed) == 0 || trimmed[0] != '#' {
+			continue
+		}
+		ws := line[:len(line)-len(trimmed)]
+		comment := strings.TrimRight(trimmed, " \t\n")
+		// Escape backticks so they nest safely inside the backtick placeholder.
+		// Inside backtick command substitutions, \` represents a literal backtick.
+		comment = strings.ReplaceAll(comment, "`", "\\`")
+		nl := ""
+		if line[len(line)-1] == '\n' {
+			nl = "\n"
+		}
+		lines[i] = ws + "`" + comment + "#`\\" + nl
+	}
+
+	// Step 2: move && before comment blocks.
+	// When we see:  code \<nl> placeholder(s) <nl> && cmd
+	// transform to: code &&\<nl> placeholder(s) <nl> cmd
+	content = strings.Join(lines, "")
+	content = reCommentContinuation.ReplaceAllString(content, "&&$1$2")
+	lines = strings.SplitAfter(content, "\n")
+
+	// Step 3: attach && to placeholders inside && chains so shfmt keeps them
+	// as part of the continuation.
+	inChain := false
+	for i, line := range lines {
+		trimmed := strings.Trim(line, " \t\\\n")
+
+		if strings.HasPrefix(trimmed, "`#") {
+			if inChain {
+				lines[i] = strings.Replace(lines[i], "#`\\", "#`&&\\", 1)
+			}
+			continue
 		}
 
-		originalTrimmed := strings.TrimLeft(originalText, " \t")
-		parts := regexp.MustCompile("[ \t]").Split(originalTrimmed, 2+len(flags))
-		content = parts[1+len(flags)]
+		inChain = strings.HasSuffix(trimmed, "&&")
 	}
-	// Try to parse as JSON
+
+	return strings.Join(lines, "")
+}
+
+// postprocessShellComments restores backtick placeholders to real comments and
+// fixes up their indentation to align with the surrounding code.
+func postprocessShellComments(content string, c *Config) string {
+	// Unwrap placeholders. A placeholder after shfmt looks like:
+	//   <ws><optional && >`# text#` \
+	// The reBacktickComment regex captures the whitespace and comment text.
+	content = reBacktickComment.ReplaceAllString(content, "$1$2")
+
+	// Single pass to fix comment indentation, restore escaped backticks,
+	// and detect leading comments.
+	lines := strings.SplitAfter(content, "\n")
+	indent := strings.Repeat(" ", int(c.IndentSize))
+	prevIsComment := false
+	prevCommentSpacing := ""
+	firstLineIsComment := false
+
+	for i, line := range lines {
+		trimmed := strings.TrimLeft(line, " \t")
+		if len(trimmed) == 0 || trimmed[0] != '#' {
+			prevIsComment = false
+			continue
+		}
+
+		ws := line[:len(line)-len(trimmed)]
+		// Restore backticks that were escaped for the backtick placeholder.
+		trimmed = strings.ReplaceAll(trimmed, "\\`", "`")
+
+		if i == 0 {
+			// First line being a comment means the directive would merge with it
+			// (e.g. "RUN # comment"). We'll insert a continuation before it after the loop.
+			firstLineIsComment = true
+			lines[i] = indent + trimmed
+			prevCommentSpacing = indent
+		} else if prevIsComment {
+			// Consecutive comments share the indentation of the first in the group.
+			lines[i] = prevCommentSpacing + trimmed
+		} else {
+			prevCommentSpacing = ws
+			lines[i] = ws + trimmed
+		}
+		prevIsComment = true
+	}
+
+	if firstLineIsComment {
+		lines = slices.Insert(lines, 0, "\\\n")
+	}
+
+	return strings.Join(lines, "")
+}
+
+func formatRun(n *ExtendedNode, c *Config) string {
+	hereDoc := false
+	flags := n.Flags
+
+	var content string
+	if len(n.Heredocs) >= 1 {
+		content = n.Heredocs[0].Content
+		hereDoc = true
+	} else {
+		content, _ = extractDirectiveContent(n, len(flags))
+	}
+
 	var jsonItems []string
-	err := json.Unmarshal([]byte(content), &jsonItems)
-	if err == nil {
-		out, err := Marshal(jsonItems)
+	if json.Unmarshal([]byte(content), &jsonItems) == nil {
+		outStr, err := marshalJSONArray(jsonItems)
 		if err != nil {
 			panic(err)
 		}
-		outStr := strings.ReplaceAll(string(out), "\",\"", "\", \"")
 		content = outStr + "\n"
 	} else {
 		content = formatShell(content, hereDoc, c)
 		if hereDoc {
-			n.Node.Heredocs[0].Content = content
+			n.Heredocs[0].Content = content
 			content, _ = GetHeredoc(n)
 		}
 	}
 
-	if len(flags) > 0 {
-		content = strings.Join(flags, " ") + " " + content
-	}
-
-	return strings.ToUpper(n.Value) + " " + content
+	return n.directive() + " " + prependFlags(flags, content, c)
 }
 
 func GetHeredoc(n *ExtendedNode) (string, bool) {
-	if len(n.Node.Heredocs) == 0 {
+	if len(n.Heredocs) == 0 {
 		return "", false
 	}
 
-	// printAST(n, 0)
 	args := []string{}
 	cur := n.Next
 	for cur != nil {
-		if cur.Node.Value != "" {
-			args = append(args, cur.Node.Value)
+		if cur.Value != "" {
+			args = append(args, cur.Value)
 		}
 		cur = cur.Next
 	}
-	content := strings.Join(args, " ") + "\n" + n.Node.Heredocs[0].Content + n.Node.Heredocs[0].Name + "\n"
+	content := strings.Join(args, " ") + "\n" + n.Heredocs[0].Content + n.Heredocs[0].Name + "\n"
 	return content, true
 }
 func formatBasic(n *ExtendedNode, c *Config) string {
-	// Uppercases the command, and indent the following lines
-	originalTrimmed := strings.TrimLeft(n.OriginalMultiline, " \t")
-
 	value, success := GetHeredoc(n)
 	if !success {
-		parts := regexp.MustCompile("[ \t]").Split(originalTrimmed, 2)
-		if len(parts) < 2 {
-			// No argument after directive; just return the directive itself
-			return strings.ToUpper(n.Value) + "\n"
+		rawContent, ok := extractDirectiveContent(n, 0)
+		if !ok {
+			return n.directive() + "\n"
 		}
-		value = strings.TrimLeft(parts[1], " \t")
+		value = strings.TrimLeft(rawContent, " \t")
 	}
-	return IndentFollowingLines(strings.ToUpper(n.Value)+" "+value, c.IndentSize)
+	return IndentFollowingLines(n.directive()+" "+value, c.IndentSize)
 }
 
 // Marshal is a UTF-8 friendly marshaler.  Go's json.Marshal is not UTF-8
@@ -456,49 +494,30 @@ func getCmd(n *ExtendedNode, shouldSplitNode bool) []string {
 	cmd := []string{}
 	for node := n; node != nil; node = node.Next {
 		// Split value by whitespace
-		rawValue := strings.Trim(node.Node.Value, " \t")
-		if len(node.Node.Flags) > 0 {
-			cmd = append(cmd, node.Node.Flags...)
+		rawValue := strings.Trim(node.Value, " \t")
+		if len(node.Flags) > 0 {
+			cmd = append(cmd, node.Flags...)
 		}
-		// log.Printf("ShouldSplitNode: %v\n", shouldSplitNode)
 		if shouldSplitNode {
 			parts, err := shlex.Split(rawValue)
 			if err != nil {
-				log.Fatalf("Error splitting: %s\n", node.Node.Value)
+				log.Fatalf("Error splitting: %s\n", node.Value)
 			}
 			cmd = append(cmd, parts...)
 		} else {
 			cmd = append(cmd, rawValue)
 		}
 	}
-	// log.Printf("getCmd: %v\n", cmd)
 	return cmd
 }
 
-func formatEntrypoint(n *ExtendedNode, c *Config) string {
-	return formatCmd(n, c)
-}
 func formatCmd(n *ExtendedNode, c *Config) string {
-	// Determine JSON form from parser attributes
-	isJSON, ok := n.Node.Attributes["json"]
-	if !ok {
-		isJSON = false
-	}
+	isJSON := n.Attributes["json"]
 
-	// Extract raw content after directive (and any flags)
-	flags := n.Node.Flags
-	originalText := n.OriginalMultiline
-	if originalText == "" {
-		originalText = n.Node.Original
-	}
-	originalTrimmed := strings.TrimLeft(originalText, " \t")
-	parts := regexp.MustCompile("[ \t]").Split(originalTrimmed, 2+len(flags))
-	if len(parts) < 1+len(flags) {
-		return strings.ToUpper(n.Value) + "\n"
-	}
-	var content string
-	if len(parts) >= 2+len(flags) {
-		content = parts[1+len(flags)]
+	flags := n.Flags
+	content, ok := extractDirectiveContent(n, len(flags))
+	if !ok && len(flags) > 0 {
+		return n.directive() + "\n"
 	}
 
 	// If JSON form (attribute or decodable), format as JSON array with spaces
@@ -508,124 +527,84 @@ func formatCmd(n *ExtendedNode, c *Config) string {
 		if !isJSON && len(items) == 0 {
 			items = jsonItems
 		}
-		b, err := Marshal(items)
+		outStr, err := marshalJSONArray(items)
 		if err != nil {
 			return ""
 		}
-		bWithSpace := strings.ReplaceAll(string(b), "\",\"", "\", \"")
-		return strings.ToUpper(n.Node.Value) + " " + bWithSpace + "\n"
+		return n.directive() + " " + outStr + "\n"
 	}
 
 	// Otherwise, format as shell command
 	shell := formatShell(content, false, c)
-	if len(flags) > 0 {
-		shell = strings.Join(flags, " ") + " " + shell
-	}
-	return strings.ToUpper(n.Node.Value) + " " + shell
+	return n.directive() + " " + prependFlags(flags, shell, c)
 }
 
 func formatSpaceSeparated(n *ExtendedNode, c *Config) string {
-	isJSON, ok := n.Node.Attributes["json"]
-	if !ok {
-		isJSON = false
-	}
+	isJSON := n.Attributes["json"]
 	cmd, success := GetHeredoc(n)
 	if !success {
-		cmd = strings.Join(getCmd(n.Next, isJSON), " ")
-		if len(n.Node.Flags) > 0 {
-			cmd = strings.Join(n.Node.Flags, " ") + " " + cmd
-		}
-		cmd += "\n"
+		cmd = prependFlags(n.Flags, strings.Join(getCmd(n.Next, isJSON), " "), c) + "\n"
 	}
 
-	return strings.ToUpper(n.Node.Value) + " " + cmd
+	return n.directive() + " " + cmd
 }
 
 func formatMaintainer(n *ExtendedNode, c *Config) string {
-
-	// Get text between quotes
-	maintainer := strings.Trim(n.Next.Node.Value, "\"")
+	maintainer := strings.Trim(n.Next.Value, "\"")
 	return "LABEL org.opencontainers.image.authors=\"" + maintainer + "\"\n"
 }
 
 func GetFileLines(fileName string) ([]string, error) {
-	// Open the file
-	f, err := os.Open(fileName)
+	b, err := os.ReadFile(fileName)
 	if err != nil {
-		return []string{}, err
+		return nil, err
 	}
-	defer f.Close()
-
-	// Read the file contents
-	b := new(strings.Builder)
-	io.Copy(b, f)
-	fileLines := strings.SplitAfter(b.String(), "\n")
-
-	return fileLines, nil
+	return strings.SplitAfter(string(b), "\n"), nil
 }
 
 func StripWhitespace(lines string, rightOnly bool) string {
-	// Split the string into lines by newlines
-	// log.Printf("Lines: .%s.\n", lines)
 	linesArray := strings.SplitAfter(lines, "\n")
-	// Create a new slice to hold the stripped lines
-	var strippedLines string
-	// Iterate over each line
+	var b strings.Builder
+	b.Grow(len(lines))
 	for _, line := range linesArray {
-		// Trim leading and trailing whitespace
-		// log.Printf("Line .%s.\n", line)
 		hadNewline := len(line) > 0 && line[len(line)-1] == '\n'
 		if rightOnly {
-			// Only trim trailing whitespace
 			line = strings.TrimRight(line, " \t\n")
 		} else {
-			// Trim both leading and trailing whitespace
 			line = strings.Trim(line, " \t\n")
 		}
-
-		// log.Printf("Line2 .%s.", line)
 		if hadNewline {
 			line += "\n"
 		}
-		strippedLines += line
+		b.WriteString(line)
 	}
-	return strippedLines
+	return b.String()
 }
 
+// FormatComments strips whitespace and collapses 3+ consecutive newlines into one.
 func FormatComments(lines []string) string {
-	// Adds lines to the output, collapsing multiple newlines into a single newline
-	// and removing leading / trailing whitespace. We can do this because
-	// we are adding comments and we don't care about the formatting.
-	missingContent := StripWhitespace(strings.Join(lines, ""), false)
-	// Replace multiple newlines with a single newline
-	re := regexp.MustCompile(`\n{3,}`)
-	return re.ReplaceAllString(missingContent, "\n")
+	content := StripWhitespace(strings.Join(lines, ""), false)
+	return reMultipleNewlines.ReplaceAllString(content, "\n")
 }
 
+// IndentFollowingLines re-indents all lines after the first to indentSize spaces.
 func IndentFollowingLines(lines string, indentSize uint) string {
-	// Split the input by lines
 	allLines := strings.SplitAfter(lines, "\n")
-
-	// If there's only one line or no lines, return the original
 	if len(allLines) <= 1 {
 		return lines
 	}
 
-	// Keep the first line as is
-	result := allLines[0]
-	// Indent all subsequent lines
-	for i := 1; i < len(allLines); i++ {
-		if allLines[i] != "" { // Skip empty lines
-			// Remove existing indentation and add new indentation
-			trimmedLine := strings.TrimLeft(allLines[i], " \t")
-			allLines[i] = strings.Repeat(" ", int(indentSize)) + trimmedLine
+	indent := strings.Repeat(" ", int(indentSize))
+	var b strings.Builder
+	b.Grow(len(lines) + len(indent)*len(allLines))
+	b.WriteString(allLines[0])
+	for _, line := range allLines[1:] {
+		if line != "" {
+			line = indent + strings.TrimLeft(line, " \t")
 		}
-
-		// Add to result (with newline except for the last line)
-		result += allLines[i]
+		b.WriteString(line)
 	}
-
-	return result
+	return b.String()
 }
 
 func formatBash(s string, c *Config) string {
@@ -644,41 +623,4 @@ func formatBash(s string, c *Config) string {
 		syntax.BinaryNextLine(true),
 	).Print(buf, f)
 	return buf.String()
-}
-
-/*
-*
-// Node is a structure used to represent a parse tree.
-//
-// In the node there are three fields, Value, Next, and Children. Value is the
-// current token's string value. Next is always the next non-child token, and
-// children contains all the children. Here's an example:
-//
-// (value next (child child-next child-next-next) next-next)
-//
-*/
-func printAST(n *ExtendedNode, indent int) {
-
-	fmt.Printf("\n%sNode: %s\n", strings.Repeat("\t", indent), n.Node.Value)
-	fmt.Printf("%sOriginal: %s\n", strings.Repeat("\t", indent), n.Node.Original)
-	fmt.Printf("%sOriginalMultiline\n%s=====\n%s%s======\n", strings.Repeat("\t", indent), strings.Repeat("\t", indent), n.OriginalMultiline, strings.Repeat("\t", indent))
-	fmt.Printf("%sAttributes: %v\n", strings.Repeat("\t", indent), n.Node.Attributes)
-	fmt.Printf("%sHeredocs: %v\n", strings.Repeat("\t", indent), n.Node.Heredocs)
-	// n.PrevComment
-	fmt.Printf("%sPrevComment: %v\n", strings.Repeat("\t", indent), n.Node.PrevComment)
-	fmt.Printf("%sStartLine: %d\n", strings.Repeat("\t", indent), n.Node.StartLine)
-	fmt.Printf("%sEndLine: %d\n", strings.Repeat("\t", indent), n.Node.EndLine)
-	fmt.Printf("%sFlags: %v\n", strings.Repeat("\t", indent), n.Node.Flags)
-
-	if n.Children != nil {
-		fmt.Printf("\n%s!!!! Children\n%s==========\n", strings.Repeat("\t", indent), strings.Repeat("\t", indent))
-		for _, c := range n.Children {
-			printAST(c, indent+1)
-		}
-	}
-	if n.Next != nil {
-		fmt.Printf("\n%s!!!! Next\n%s==========\n", strings.Repeat("\t", indent), strings.Repeat("\t", indent))
-		printAST(n.Next, indent+1)
-	}
-
 }
