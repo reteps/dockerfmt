@@ -8,7 +8,7 @@ import (
 
 // Version is set at build time via ldflags:
 //
-//	go build -ldflags "-X github.com/reteps/dockerfmt/cmd.Version=v0.3.9"
+//	go build -ldflags "-X github.com/reteps/dockerfmt/cmd.Version=v0.4.0"
 var Version = "dev"
 
 func init() {
