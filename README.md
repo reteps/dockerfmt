@@ -23,7 +23,7 @@ docker run --rm -v $(pwd):/pwd ghcr.io/reteps/dockerfmt:latest /pwd/tests/in/run
 ## Usage
 
 ```output
-A updated version of the dockfmt. Uses the dockerfile parser from moby/buildkit and the shell formatter from mvdan/sh.
+Format Dockerfiles and shell commands within RUN steps. If no files are specified, input is read from stdin.
 
 Usage:
   dockerfmt [Dockerfile...] [flags]
