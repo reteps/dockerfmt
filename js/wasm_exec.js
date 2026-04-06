@@ -100,6 +100,10 @@
 	const encoder = new TextEncoder("utf-8");
 	const decoder = new TextDecoder("utf-8");
 
+	// Save any existing Go constructor so we can restore it after capturing our own.
+	// This prevents clobbering the global Go when other packages (e.g. sh-syntax)
+	// rely on their own wasm_exec.js version with different capabilities (like WASI support).
+	const __previousGo = globalThis.Go;
 	globalThis.Go = class {
 		constructor() {
 			this.argv = ["js"];
@@ -571,5 +575,13 @@
 				return event.result;
 			};
 		}
+	}
+	// Stash our Go class under a namespaced global and restore the previous one,
+	// so we don't break other Go WASM packages sharing the same global scope.
+	globalThis.__dockerfmt_Go = globalThis.Go;
+	if (__previousGo) {
+		globalThis.Go = __previousGo;
+	} else {
+		delete globalThis.Go;
 	}
 })();

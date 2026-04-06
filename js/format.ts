@@ -11,7 +11,10 @@ export const formatDockerfileContents = async (
     options: FormatOptions,
     getWasm: () => Promise<Buffer>,
 ) => {
-    const go = new Go() // Defined in wasm_exec.js
+    // Use our namespaced Go class instead of globalThis.Go to avoid conflicts
+    // with other Go WASM packages (see wasm_exec.js modifications).
+    const GoClass = (globalThis as any).__dockerfmt_Go as typeof Go
+    const go = new GoClass()
 
     const wasmBuffer = await getWasm()
     const wasm = await WebAssembly.instantiate(wasmBuffer, go.importObject)
