@@ -32,12 +32,6 @@ func TestFormatter(t *testing.T) {
 			fmt.Printf("Comparing file %s with %s\n", fileName, outFile)
 			formattedLines := lib.FormatFileLines(originalLines, c)
 
-			// Write outFile to directory
-			// err = os.WriteFile(outFile, []byte(formattedLines), 0644)
-			// if err != nil {
-			// 	t.Fatalf("Failed to write to file %s: %v", outFile, err)
-			// }
-
 			// Read outFile
 			outLines, err := lib.GetFileLines(outFile)
 			if err != nil {
