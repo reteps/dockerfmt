@@ -2,7 +2,6 @@ package lib
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -121,14 +120,6 @@ func extractDirectiveContent(n *ExtendedNode, flagCount int) (string, bool) {
 	return parts[1], true
 }
 
-// marshalJSONArray formats a string slice as a JSON array with spaces after commas.
-func marshalJSONArray(items []string) (string, error) {
-	b, err := Marshal(items)
-	if err != nil {
-		return "", err
-	}
-	return strings.ReplaceAll(string(b), "\",\"", "\", \""), nil
-}
 
 var nodeFormatters map[string]func(*ExtendedNode, *Config) string
 
@@ -429,13 +420,8 @@ func formatRun(n *ExtendedNode, c *Config) string {
 		content, _ = extractDirectiveContent(n, len(flags))
 	}
 
-	var jsonItems []string
-	if json.Unmarshal([]byte(content), &jsonItems) == nil {
-		outStr, err := marshalJSONArray(jsonItems)
-		if err != nil {
-			panic(err)
-		}
-		content = outStr + "\n"
+	if jsonItems, ok := unmarshalJSONStringArray(content); ok {
+		content = marshalJSONStringArray(jsonItems) + "\n"
 	} else {
 		content = formatShell(content, hereDoc, c)
 		if hereDoc {
@@ -475,21 +461,6 @@ func formatBasic(n *ExtendedNode, c *Config) string {
 	return IndentFollowingLines(n.directive()+" "+value, c.IndentSize)
 }
 
-// Marshal is a UTF-8 friendly marshaler.  Go's json.Marshal is not UTF-8
-// friendly because it replaces the valid UTF-8 and JSON characters "&". "<",
-// ">" with the "slash u" unicode escaped forms (e.g. \u0026).  It preemptively
-// escapes for HTML friendliness.  Where text may include any of these
-// characters, json.Marshal should not be used. Playground of Go breaking a
-// title: https://play.golang.org/p/o2hiX0c62oN
-// Source: https://stackoverflow.com/a/69502657/5684541
-func Marshal(i interface{}) ([]byte, error) {
-	buffer := &bytes.Buffer{}
-	encoder := json.NewEncoder(buffer)
-	encoder.SetEscapeHTML(false)
-	err := encoder.Encode(i)
-	return bytes.TrimRight(buffer.Bytes(), "\n"), err
-}
-
 func getCmd(n *ExtendedNode, shouldSplitNode bool) []string {
 	cmd := []string{}
 	for node := n; node != nil; node = node.Next {
@@ -521,17 +492,13 @@ func formatCmd(n *ExtendedNode, c *Config) string {
 	}
 
 	// If JSON form (attribute or decodable), format as JSON array with spaces
-	var jsonItems []string
-	if isJSON || json.Unmarshal([]byte(content), &jsonItems) == nil {
+	jsonItems, jsonOK := unmarshalJSONStringArray(content)
+	if isJSON || jsonOK {
 		items := getCmd(n.Next, false)
 		if !isJSON && len(items) == 0 {
 			items = jsonItems
 		}
-		outStr, err := marshalJSONArray(items)
-		if err != nil {
-			return ""
-		}
-		return n.directive() + " " + outStr + "\n"
+		return n.directive() + " " + marshalJSONStringArray(items) + "\n"
 	}
 
 	// Otherwise, format as shell command

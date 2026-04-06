@@ -96,26 +96,58 @@ func TestIndentFollowingLines(t *testing.T) {
 	}
 }
 
-// --- Marshal ---
+// --- marshalJSONStringArray ---
 
-func TestMarshal(t *testing.T) {
+func TestMarshalJSONStringArray(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    interface{}
+		input    []string
 		expected string
 	}{
-		{"string slice", []string{"a", "b"}, `["a","b"]`},
+		{"string slice", []string{"a", "b"}, `["a", "b"]`},
 		{"angle brackets not escaped", []string{"<foo>"}, `["<foo>"]`},
 		{"ampersand not escaped", []string{"a&b"}, `["a&b"]`},
 		{"empty slice", []string{}, `[]`},
 		{"single item", []string{"hello"}, `["hello"]`},
+		{"with quotes", []string{`say "hi"`}, `["say \"hi\""]`},
+		{"with backslash", []string{`a\b`}, `["a\\b"]`},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := Marshal(tt.input)
-			require.NoError(t, err)
-			assert.Equal(t, tt.expected, string(result))
+			result := marshalJSONStringArray(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// --- unmarshalJSONStringArray ---
+
+func TestUnmarshalJSONStringArray(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+		ok       bool
+	}{
+		{"simple array", `["a", "b"]`, []string{"a", "b"}, true},
+		{"no spaces", `["a","b"]`, []string{"a", "b"}, true},
+		{"empty array", `[]`, []string{}, true},
+		{"single item", `["hello"]`, []string{"hello"}, true},
+		{"with escapes", `["say \"hi\""]`, []string{`say "hi"`}, true},
+		{"not json", `echo hello`, nil, false},
+		{"not array", `"hello"`, nil, false},
+		{"mixed types", `["a", 1]`, nil, false},
+		{"nested array", `[["a"]]`, nil, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, ok := unmarshalJSONStringArray(tt.input)
+			assert.Equal(t, tt.ok, ok)
+			if ok {
+				assert.Equal(t, tt.expected, result)
+			}
 		})
 	}
 }
