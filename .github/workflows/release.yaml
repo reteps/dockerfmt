@@ -20,7 +20,11 @@ jobs:
       - name: Build and push Docker image
         run: |
           VERSION=${GITHUB_REF_NAME:-dev}
-          ko build --bare --tags "${VERSION},latest" \
+          TAGS="${VERSION}"
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAGS="${VERSION},latest"
+          fi
+          ko build --bare --tags "${TAGS}" \
             --image-label "org.opencontainers.image.version=${VERSION}" \
             --image-label "org.opencontainers.image.source=https://github.com/${{ github.repository }}"
         env:
