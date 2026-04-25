@@ -201,6 +201,12 @@ func FormatOnBuild(n *ExtendedNode, c *Config) string {
 	if len(n.Node.Next.Children) == 1 {
 		output, ok := FormatNode(n.Next.Children[0], c)
 		if ok {
+			// Inner directives nested under ONBUILD have StartLine=0, so their
+			// OriginalMultiline is empty and formatters that fall back to n.Original
+			// (which has no trailing newline) produce output without one.
+			if !strings.HasSuffix(output, "\n") {
+				output += "\n"
+			}
 			return n.directive() + " " + output
 		}
 	}
