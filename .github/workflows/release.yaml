@@ -29,6 +29,7 @@ jobs:
             --image-label "org.opencontainers.image.source=https://github.com/${{ github.repository }}"
         env:
           GOFLAGS: -ldflags=-X=github.com/reteps/dockerfmt/cmd.Version=${{ github.ref_name }}
+          KO_DEFAULTPLATFORMS: linux/amd64,linux/arm64
   releases-matrix:
     name: Release Go Binary
     runs-on: ubuntu-latest
