@@ -16,16 +16,15 @@ const arch = process.arch
 // Keep this list in sync with optionalDependencies in package.json, the
 // directories under js/npm/, and the build matrix in release-js.yaml.
 const pkg = `@reteps/dockerfmt-${platform}-${arch}`
-const binName = platform === 'win32' ? 'dockerfmt.exe' : 'dockerfmt'
 
 let binPath: string
 try {
-    binPath = require.resolve(`${pkg}/bin/${binName}`)
+    binPath = require.resolve(`${pkg}/bin/dockerfmt`)
 } catch {
     throw new Error(
         `dockerfmt does not ship a prebuilt binary for ${platform}-${arch} ` +
             `(expected optional dependency "${pkg}"). Supported platforms: ` +
-            `linux-x64, linux-arm64, darwin-x64, darwin-arm64, win32-x64. ` +
+            `linux-x64, linux-arm64, darwin-x64, darwin-arm64. ` +
             `Download the Go binary from ` +
             `https://github.com/reteps/dockerfmt/releases instead.`,
     )

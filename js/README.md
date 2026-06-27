@@ -38,5 +38,5 @@ therefore identical to the Go CLI; see the [main README](../README.md) for the
 full reference.
 
 Prebuilt binaries are published for `linux-x64`, `linux-arm64`, `darwin-x64`,
-`darwin-arm64`, and `win32-x64`. On other platforms, install the Go binary from
+and `darwin-arm64`. On other platforms, install the Go binary from
 the [releases page](https://github.com/reteps/dockerfmt/releases) instead.

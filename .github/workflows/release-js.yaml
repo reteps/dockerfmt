@@ -23,16 +23,15 @@ jobs:
         run: |
           LDFLAGS="-s -w -X github.com/reteps/dockerfmt/cmd.Version=${GITHUB_REF_NAME}"
           build() {
-            pkg=$1; goos=$2; goarch=$3; ext=$4
+            pkg=$1; goos=$2; goarch=$3
             echo "building $pkg ($goos/$goarch)"
             GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 \
-              go build -ldflags "$LDFLAGS" -o "js/npm/${pkg}/bin/dockerfmt${ext}" .
+              go build -ldflags "$LDFLAGS" -o "js/npm/${pkg}/bin/dockerfmt" .
           }
-          build linux-x64    linux   amd64 ""
-          build linux-arm64  linux   arm64 ""
-          build darwin-x64   darwin  amd64 ""
-          build darwin-arm64 darwin  arm64 ""
-          build win32-x64    windows amd64 ".exe"
+          build linux-x64    linux   amd64
+          build linux-arm64  linux   arm64
+          build darwin-x64   darwin  amd64
+          build darwin-arm64 darwin  arm64
       # Pin the main package, every sub-package, and the optionalDependencies to
       # the release version so they publish in lockstep.
       - name: Pin versions
