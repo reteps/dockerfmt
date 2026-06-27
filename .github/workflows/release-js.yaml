@@ -29,21 +29,21 @@ jobs:
           build linux-arm64  linux   arm64
           build darwin-x64   darwin  amd64
           build darwin-arm64 darwin  arm64
-      # Pin the main package, every sub-package, and the optionalDependencies to
-      # the release version so they publish in lockstep.
+      # Reproducible install from the committed lockfile. This must run BEFORE
+      # set-version.mjs: the committed package.json has no optionalDependencies
+      # (set-version injects them below), so the lock is satisfiable and floating
+      # deps can't sneak in. Bumping the version afterwards doesn't matter — we
+      # never install again.
+      - name: Install JS deps
+        working-directory: js
+        run: npm ci
+      # Pin the main package, every sub-package, and inject the optionalDependencies
+      # at the release version so they publish in lockstep.
       - name: Pin versions
         run: node js/scripts/set-version.mjs "${GITHUB_REF_NAME#v}"
-      # --no-package-lock is required: the optionalDependencies point at the
-      # platform packages, which only exist at the release version (not in the
-      # committed lockfile), so `npm ci` can't satisfy the lock. devDependencies
-      # are pinned to exact versions in package.json so this install is still
-      # reproducible despite ignoring the lock (a floating @types/node once broke
-      # the tsc build here).
       - name: Build JS library bindings
         working-directory: js
-        run: |
-          npm install --no-package-lock --omit=optional
-          npm run build-js
+        run: npm run build-js
       # Publish the platform packages first so the main package's
       # optionalDependencies resolve immediately on install.
       - name: Publish platform packages

@@ -8,7 +8,13 @@
     "directory": "js"
   },
   "license": "MIT",
-  "os": ["darwin"],
-  "cpu": ["arm64"],
-  "files": ["bin"]
+  "cpu": [
+    "arm64"
+  ],
+  "os": [
+    "darwin"
+  ],
+  "files": [
+    "bin"
+  ]
 }

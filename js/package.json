@@ -13,6 +13,9 @@
   "engines": {
     "node": "^v12.20.0 || ^14.13.0 || >=16.0.0"
   },
+  "bin": {
+    "dockerfmt": "./dist/launcher.js"
+  },
   "exports": {
     ".": {
       "browser": {
@@ -29,15 +32,6 @@
     "./wasm_exec": "./dist/wasm_exec.js",
     "./wasm_exec.js": "./dist/wasm_exec.js"
   },
-  "bin": {
-    "dockerfmt": "./dist/launcher.js"
-  },
-  "optionalDependencies": {
-    "@reteps/dockerfmt-darwin-arm64": "0.0.0-dev",
-    "@reteps/dockerfmt-darwin-x64": "0.0.0-dev",
-    "@reteps/dockerfmt-linux-arm64": "0.0.0-dev",
-    "@reteps/dockerfmt-linux-x64": "0.0.0-dev"
-  },
   "files": [
     "dist"
   ],
@@ -48,9 +42,9 @@
     "format": "prettier --write \"**/*.{js,ts,json}\""
   },
   "devDependencies": {
-    "@types/node": "22.14.0",
-    "prettier": "3.5.3",
-    "prettier-plugin-pkg": "0.19.0",
-    "typescript": "5.8.3"
+    "@types/node": "24.13.2",
+    "prettier": "3.9.0",
+    "prettier-plugin-pkg": "0.22.1",
+    "typescript": "6.0.3"
   }
 }

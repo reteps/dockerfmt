@@ -17,7 +17,10 @@ export const formatDockerfileContents = async (
     const go = new GoClass()
 
     const wasmBuffer = await getWasm()
-    const wasm = await WebAssembly.instantiate(wasmBuffer, go.importObject)
+    const wasm = await WebAssembly.instantiate(
+        wasmBuffer as BufferSource,
+        go.importObject,
+    )
 
     /**
      * Do not await this promise, because it only resolves once the go main()
