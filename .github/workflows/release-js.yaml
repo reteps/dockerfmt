@@ -16,9 +16,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24.x'
-      # Compile the real dockerfmt binary for each published platform straight
-      # from cmd/root.go. The npm CLI is just a launcher around these binaries,
-      # so the CLI behaviour can never drift from the standalone Go tool.
       - name: Build platform binaries
         run: |
           LDFLAGS="-s -w -X github.com/reteps/dockerfmt/cmd.Version=${GITHUB_REF_NAME}"
