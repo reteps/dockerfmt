@@ -33,6 +33,12 @@ jobs:
       # the release version so they publish in lockstep.
       - name: Pin versions
         run: node js/scripts/set-version.mjs "${GITHUB_REF_NAME#v}"
+      # --no-package-lock is required: the optionalDependencies point at the
+      # platform packages, which only exist at the release version (not in the
+      # committed lockfile), so `npm ci` can't satisfy the lock. devDependencies
+      # are pinned to exact versions in package.json so this install is still
+      # reproducible despite ignoring the lock (a floating @types/node once broke
+      # the tsc build here).
       - name: Build JS library bindings
         working-directory: js
         run: |
