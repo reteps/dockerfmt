@@ -44,12 +44,23 @@ jobs:
       - name: Build JS library bindings
         working-directory: js
         run: npm run build-js
-      # Publish the platform packages first so the main package's
+      # Skip any version already on the registry so a re-run after a partial
+      # failure only publishes what's missing (npm rejects republishing an
+      # existing version). Platform packages publish first so the main package's
       # optionalDependencies resolve immediately on install.
-      - name: Publish platform packages
+      - name: Publish to npm
         run: |
+          publish_if_missing() {
+            dir=$1
+            name=$(npm pkg get name --prefix "$dir" | tr -d '"')
+            version=$(npm pkg get version --prefix "$dir" | tr -d '"')
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version already published, skipping"
+            else
+              npm publish --provenance --access public "$dir"
+            fi
+          }
           for dir in js/npm/*/; do
-            npm publish --provenance --access public "$dir"
+            publish_if_missing "$dir"
           done
-      - name: Publish main package
-        run: npm publish --provenance --access public ./js
+          publish_if_missing ./js
