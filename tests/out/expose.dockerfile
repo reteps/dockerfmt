@@ -1,0 +1,5 @@
+FROM scratch
+EXPOSE 80 \
+    443 \
+    8080
+EXPOSE 9000
