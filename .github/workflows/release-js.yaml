@@ -13,11 +13,41 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24.x'
-      - name: Set version from tag and publish
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      # Compile the real dockerfmt binary for each published platform straight
+      # from cmd/root.go. The npm CLI is just a launcher around these binaries,
+      # so the CLI behaviour can never drift from the standalone Go tool.
+      - name: Build platform binaries
         run: |
-          cd js
-          VERSION=${GITHUB_REF_NAME#v}
-          npm --no-git-tag-version version "${VERSION}"
-          npm ci
+          LDFLAGS="-s -w -X github.com/reteps/dockerfmt/cmd.Version=${GITHUB_REF_NAME}"
+          build() {
+            pkg=$1; goos=$2; goarch=$3; ext=$4
+            echo "building $pkg ($goos/$goarch)"
+            GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 \
+              go build -ldflags "$LDFLAGS" -o "js/npm/${pkg}/bin/dockerfmt${ext}" .
+          }
+          build linux-x64    linux   amd64 ""
+          build linux-arm64  linux   arm64 ""
+          build darwin-x64   darwin  amd64 ""
+          build darwin-arm64 darwin  arm64 ""
+          build win32-x64    windows amd64 ".exe"
+      # Pin the main package, every sub-package, and the optionalDependencies to
+      # the release version so they publish in lockstep.
+      - name: Pin versions
+        run: node js/scripts/set-version.mjs "${GITHUB_REF_NAME#v}"
+      - name: Build JS library bindings
+        working-directory: js
+        run: |
+          npm install --no-package-lock --omit=optional
           npm run build-js
-          npm publish --provenance --access public
+      # Publish the platform packages first so the main package's
+      # optionalDependencies resolve immediately on install.
+      - name: Publish platform packages
+        run: |
+          for dir in js/npm/*/; do
+            npm publish --provenance --access public "$dir"
+          done
+      - name: Publish main package
+        run: npm publish --provenance --access public ./js

@@ -29,6 +29,16 @@
     "./wasm_exec": "./dist/wasm_exec.js",
     "./wasm_exec.js": "./dist/wasm_exec.js"
   },
+  "bin": {
+    "dockerfmt": "./dist/launcher.js"
+  },
+  "optionalDependencies": {
+    "@reteps/dockerfmt-darwin-arm64": "0.0.0-dev",
+    "@reteps/dockerfmt-darwin-x64": "0.0.0-dev",
+    "@reteps/dockerfmt-linux-arm64": "0.0.0-dev",
+    "@reteps/dockerfmt-linux-x64": "0.0.0-dev",
+    "@reteps/dockerfmt-win32-x64": "0.0.0-dev"
+  },
   "files": [
     "dist"
   ],

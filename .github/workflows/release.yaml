@@ -49,3 +49,29 @@ jobs:
         goos: ${{ matrix.goos }}
         goarch: ${{ matrix.goarch }}
         ldflags: -X github.com/reteps/dockerfmt/cmd.Version=${{ github.ref_name }}
+  # dockerfmt is pure Go (no cgo), so a CGO_ENABLED=0 build is fully static and
+  # already runs on musl-based systems like Alpine. This job re-publishes the
+  # static linux binaries under a clearly "musl"-labeled asset name so musl
+  # users have an obvious download. The default (glibc-labeled) artifacts above
+  # are left untouched.
+  releases-musl-matrix:
+    name: Release Go Binary (musl)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux]
+        goarch: [amd64, arm64]
+    steps:
+    - uses: actions/checkout@v4
+    - uses: wangyoucao577/go-release-action@v1
+      env:
+        # Guarantee a statically linked binary with no libc dependency.
+        CGO_ENABLED: 0
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        goos: ${{ matrix.goos }}
+        goarch: ${{ matrix.goarch }}
+        # Append a "musl" suffix to the default asset name so the static,
+        # Alpine-compatible build is easy to identify.
+        asset_name: dockerfmt-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}-musl
+        ldflags: -X github.com/reteps/dockerfmt/cmd.Version=${{ github.ref_name }}

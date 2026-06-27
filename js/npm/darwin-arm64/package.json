@@ -1,0 +1,14 @@
+{
+  "name": "@reteps/dockerfmt-darwin-arm64",
+  "version": "0.0.0-dev",
+  "description": "The macOS arm64 binary for dockerfmt.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/reteps/dockerfmt.git",
+    "directory": "js"
+  },
+  "license": "MIT",
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "files": ["bin"]
+}

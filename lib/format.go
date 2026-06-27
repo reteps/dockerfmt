@@ -63,10 +63,16 @@ func (n *ExtendedNode) directive() string {
 // prependFlags prepends flags (e.g. "--network=host") to content if any exist.
 // When any flag starts with "--mount", each flag is placed on its own continuation line.
 func prependFlags(flags []string, content string, c *Config) string {
+	return prependFlagsImpl(flags, content, c, hasMountFlag(flags))
+}
+
+// prependFlagsImpl prepends flags to content. When multiline is true, each flag
+// is placed on its own continuation line.
+func prependFlagsImpl(flags []string, content string, c *Config, multiline bool) string {
 	if len(flags) == 0 {
 		return content
 	}
-	if hasMountFlag(flags) {
+	if multiline {
 		indent := strings.Repeat(" ", int(c.IndentSize))
 		var b strings.Builder
 		for _, flag := range flags {
@@ -78,6 +84,12 @@ func prependFlags(flags []string, content string, c *Config) string {
 		return b.String()
 	}
 	return strings.Join(flags, " ") + " " + content
+}
+
+// hasLineContinuation reports whether the node's original source spanned multiple
+// lines via "\" continuations.
+func hasLineContinuation(n *ExtendedNode) bool {
+	return strings.Contains(n.OriginalMultiline, "\\\n")
 }
 
 func hasMountFlag(flags []string) bool {
@@ -130,19 +142,18 @@ func extractDirectiveContent(n *ExtendedNode, flagCount int) (string, bool) {
 	return parts[1], true
 }
 
-
 var nodeFormatters map[string]func(*ExtendedNode, *Config) string
 
 func init() {
 	nodeFormatters = map[string]func(*ExtendedNode, *Config) string{
-		command.Add:         formatSpaceSeparated,
+		command.Add:         spaceSeparated(flagsOnOwnLines),
 		command.Arg:         formatBasic,
 		command.Cmd:         formatCmd,
-		command.Copy:        formatSpaceSeparated,
+		command.Copy:        spaceSeparated(flagsOnOwnLines),
 		command.Entrypoint:  formatCmd,
 		command.Env:         formatEnv,
-		command.Expose:      formatSpaceSeparated,
-		command.From:        formatSpaceSeparated,
+		command.Expose:      spaceSeparated(argsOnOwnLines),
+		command.From:        spaceSeparated(collapseLines),
 		command.Healthcheck: formatBasic,
 		command.Label:       formatBasic,
 		command.Maintainer:  formatMaintainer,
@@ -152,7 +163,7 @@ func init() {
 		command.StopSignal:  formatBasic,
 		command.User:        formatBasic,
 		command.Volume:      formatBasic,
-		command.Workdir:     formatSpaceSeparated,
+		command.Workdir:     spaceSeparated(collapseLines),
 	}
 }
 
@@ -528,14 +539,40 @@ func formatCmd(n *ExtendedNode, c *Config) string {
 	return n.directive() + " " + prependFlags(flags, shell, c)
 }
 
-func formatSpaceSeparated(n *ExtendedNode, c *Config) string {
-	isJSON := n.Attributes["json"]
-	cmd, success := GetHeredoc(n)
-	if !success {
-		cmd = prependFlags(n.Flags, strings.Join(getCmd(n.Next, isJSON), " "), c) + "\n"
-	}
+// multilineMode controls how a space-separated directive that the author wrote
+// across multiple "\" continuation lines is re-emitted. The modes differ because
+// the natural break point differs per directive: COPY/ADD break before each flag
+// but keep "<src> <dst>" together, while EXPOSE breaks before each port.
+type multilineMode int
 
-	return n.directive() + " " + cmd
+const (
+	// collapseLines always joins everything onto a single line (FROM, WORKDIR).
+	collapseLines multilineMode = iota
+	// flagsOnOwnLines keeps each flag on its own continuation line (COPY, ADD).
+	flagsOnOwnLines
+	// argsOnOwnLines keeps each argument on its own continuation line (EXPOSE).
+	argsOnOwnLines
+)
+
+// spaceSeparated returns a formatter for directives whose payload is a list of
+// flags and space-separated arguments (COPY, ADD, EXPOSE, FROM, WORKDIR). The
+// mode selects how multiline source is preserved; see multilineMode.
+func spaceSeparated(mode multilineMode) func(*ExtendedNode, *Config) string {
+	return func(n *ExtendedNode, c *Config) string {
+		isJSON := n.Attributes["json"]
+		cmd, success := GetHeredoc(n)
+		if !success {
+			argSep := " "
+			if mode == argsOnOwnLines && hasLineContinuation(n) {
+				argSep = " \\\n" + strings.Repeat(" ", int(c.IndentSize))
+			}
+			content := strings.Join(getCmd(n.Next, isJSON), argSep)
+			flagsMultiline := mode == flagsOnOwnLines && (hasLineContinuation(n) || hasMountFlag(n.Flags))
+			cmd = prependFlagsImpl(n.Flags, content, c, flagsMultiline) + "\n"
+		}
+
+		return n.directive() + " " + cmd
+	}
 }
 
 func formatMaintainer(n *ExtendedNode, c *Config) string {
