@@ -22,11 +22,7 @@ try {
     binPath = require.resolve(`${pkg}/bin/dockerfmt`)
 } catch {
     throw new Error(
-        `dockerfmt does not ship a prebuilt binary for ${platform}-${arch} ` +
-            `(expected optional dependency "${pkg}"). Supported platforms: ` +
-            `linux-x64, linux-arm64, darwin-x64, darwin-arm64. ` +
-            `Download the Go binary from ` +
-            `https://github.com/reteps/dockerfmt/releases instead.`,
+        `dockerfmt does not ship a prebuilt binary for ${platform}-${arch}.`
     )
 }
 

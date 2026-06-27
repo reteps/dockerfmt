@@ -1,2 +1,9 @@
 node_modules
 dist
+# Platform binaries are built at release time (or locally via
+# scripts/build-binaries) into each platform package's bin/ dir. Keep them out
+# of git, but DO NOT use a bin/.gitignore for this: npm honors that as an
+# .npmignore and would exclude the binary from the published tarball. The dirs
+# stay tracked via bin/.gitkeep.
+npm/*/bin/dockerfmt
+npm/*/bin/dockerfmt.exe
