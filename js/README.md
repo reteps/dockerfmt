@@ -17,5 +17,5 @@ The package also ships the `dockerfmt` CLI.
 
 ```sh
 # Format a Dockerfile and print to stdout
-npx dockerfmt Dockerfile
+npx @reteps/dockerfmt Dockerfile
 ```
