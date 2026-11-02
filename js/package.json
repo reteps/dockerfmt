@@ -37,7 +37,7 @@
   ],
   "scripts": {
     "build": "npm run build-go && npm run build-js",
-    "build-go": "GOOS=js GOARCH=wasm go build -ldflags='-s -w' -o format.wasm && wasm-opt --enable-bulk-memory -Oz -o format-opt.wasm format.wasm && mv format-opt.wasm format.wasm",
+    "build-go": "GOOS=js GOARCH=wasm go build -ldflags='-s -w' -o format.wasm && wasm-opt --enable-bulk-memory --enable-nontrapping-float-to-int -Oz -o format-opt.wasm format.wasm && mv format-opt.wasm format.wasm",
     "build-js": "tsc && cp format.wasm wasm_exec.js dist",
     "format": "prettier --write \"**/*.{js,ts,json}\""
   },
