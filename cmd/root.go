@@ -29,6 +29,8 @@ var rootCmd = &cobra.Command{
 	Long:  `Format Dockerfiles and shell commands within RUN steps. If no files are specified, input is read from stdin.`,
 	Run:   Run,
 	Args:  cobra.ArbitraryArgs,
+
+	ValidArgsFunction: completeArgs,
 }
 
 func Run(cmd *cobra.Command, args []string) {
@@ -181,6 +183,19 @@ func init() {
 	rootCmd.Flags().BoolVarP(&newlineFlag, "newline", "n", false, "End the file with a trailing newline")
 	rootCmd.Flags().UintVarP(&indentSize, "indent", "i", 4, "Number of spaces to use for indentation")
 	rootCmd.Flags().BoolVarP(&spaceRedirects, "space-redirects", "s", false, "Redirect operators will be followed by a space")
+
+	// --indent takes a number, so suggest common widths instead of falling
+	// back to filename completion.
+	_ = rootCmd.RegisterFlagCompletionFunc("indent", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"2", "4", "8"}, cobra.ShellCompDirectiveNoFileComp
+	})
+}
+
+// completeArgs completes positional arguments (Dockerfiles) as file paths.
+// Without it, cobra only offers the subcommand names and disables file
+// completion, because the root command has subcommands.
+func completeArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return nil, cobra.ShellCompDirectiveDefault
 }
 
 func Execute() {
