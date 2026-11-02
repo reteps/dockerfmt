@@ -30,6 +30,22 @@ jobs:
         env:
           GOFLAGS: -ldflags=-X=github.com/reteps/dockerfmt/cmd.Version=${{ github.ref_name }}
           KO_DEFAULTPLATFORMS: linux/amd64,linux/arm64
+      # Same binary on an Alpine base, so the image ships a shell (/bin/sh).
+      # Needed by CI systems such as GitLab CI that run job scripts in a shell.
+      - name: Build and push Alpine-based Docker image
+        run: |
+          VERSION=${GITHUB_REF_NAME:-dev}
+          TAGS="${VERSION}-alpine"
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAGS="${TAGS},alpine"
+          fi
+          ko build --bare --tags "${TAGS}" \
+            --image-label "org.opencontainers.image.version=${VERSION}" \
+            --image-label "org.opencontainers.image.source=https://github.com/${{ github.repository }}"
+        env:
+          GOFLAGS: -ldflags=-X=github.com/reteps/dockerfmt/cmd.Version=${{ github.ref_name }}
+          KO_DEFAULTPLATFORMS: linux/amd64,linux/arm64
+          KO_DEFAULTBASEIMAGE: alpine:3
   releases-matrix:
     name: Release Go Binary
     runs-on: ubuntu-latest
