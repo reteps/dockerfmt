@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/editorconfig/editorconfig-core-go/v2"
+	"github.com/pmezard/go-difflib/difflib"
 	"github.com/reteps/dockerfmt/lib"
 	"github.com/spf13/cobra"
 )
@@ -16,6 +17,7 @@ import (
 var (
 	writeFlag      bool
 	checkFlag      bool
+	diffFlag       bool
 	newlineFlag    bool
 	indentSize     uint
 	spaceRedirects bool
@@ -37,6 +39,9 @@ func Run(cmd *cobra.Command, args []string) {
 	}
 
 	allFormatted := true
+	if diffFlag {
+		checkFlag = true
+	}
 
 	if len(args) == 0 {
 		if writeFlag {
@@ -120,7 +125,21 @@ func processInput(inputName string, inputBytes []byte, config *lib.Config) (form
 
 	if checkFlag {
 		if originalContent != formattedContent {
-			fmt.Printf("%s is not formatted\n", inputName)
+			diff := ""
+			if diffFlag {
+				diff, _ = difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
+					A:        splitLines(originalContent),
+					B:        splitLines(formattedContent),
+					FromFile: "a/" + inputName,
+					ToFile:   "b/" + inputName,
+					Context:  3,
+				})
+			}
+			if diff != "" {
+				fmt.Print(strings.ReplaceAll(diff, noNewline+"\n", "\n\\ No newline at end of file\n"))
+			} else {
+				fmt.Printf("%s is not formatted\n", inputName)
+			}
 			return false
 		}
 		return true
@@ -140,9 +159,25 @@ func processInput(inputName string, inputBytes []byte, config *lib.Config) (form
 	return true
 }
 
+// noNewline marks a final line lacking "\n" so difflib sees it as different from the same line with one.
+const noNewline = "\x00"
+
+// splitLines splits s into newline-terminated lines (difflib.SplitLines adds a spurious trailing blank line).
+func splitLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	if !strings.HasSuffix(s, "\n") {
+		s += noNewline + "\n"
+	}
+	lines := strings.SplitAfter(s, "\n")
+	return lines[:len(lines)-1]
+}
+
 func init() {
 	rootCmd.Flags().BoolVarP(&writeFlag, "write", "w", false, "Write the formatted output back to the file(s)")
 	rootCmd.Flags().BoolVarP(&checkFlag, "check", "c", false, "Check if the file(s) are formatted")
+	rootCmd.Flags().BoolVarP(&diffFlag, "diff", "d", false, "Print a unified diff of the changes needed (implies --check)")
 	rootCmd.Flags().BoolVarP(&newlineFlag, "newline", "n", false, "End the file with a trailing newline")
 	rootCmd.Flags().UintVarP(&indentSize, "indent", "i", 4, "Number of spaces to use for indentation")
 	rootCmd.Flags().BoolVarP(&spaceRedirects, "space-redirects", "s", false, "Redirect operators will be followed by a space")

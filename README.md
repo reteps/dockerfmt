@@ -108,6 +108,9 @@ cat Dockerfile | dockerfmt
 
 # check if already formatted (exits non-zero if not)
 dockerfmt -c Dockerfile
+
+# same, but print a unified diff of the changes needed
+dockerfmt -d Dockerfile
 ```
 
 ```
@@ -122,6 +125,7 @@ Available Commands:
 
 Flags:
   -c, --check             Check if the file(s) are formatted
+  -d, --diff              Print a unified diff of the changes needed (implies --check)
   -h, --help              help for dockerfmt
   -i, --indent uint       Number of spaces to use for indentation (default 4)
   -n, --newline           End the file with a trailing newline
