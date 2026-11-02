@@ -41,9 +41,13 @@ jobs:
       # at the release version so they publish in lockstep.
       - name: Pin versions
         run: node js/scripts/set-version.mjs "${GITHUB_REF_NAME#v}"
+      - name: Install wasm-opt
+        run: sudo apt-get install -y binaryen
+      # Rebuild format.wasm from the tagged source (build-go) rather than
+      # shipping the committed copy, which can lag behind lib/ changes.
       - name: Build JS library bindings
         working-directory: js
-        run: npm run build-js
+        run: npm run build
       # Skip any version already on the registry so a re-run after a partial
       # failure only publishes what's missing (npm rejects republishing an
       # existing version). Platform packages publish first so the main package's
