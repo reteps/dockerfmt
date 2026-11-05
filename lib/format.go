@@ -576,7 +576,16 @@ func spaceSeparated(mode multilineMode) func(*ExtendedNode, *Config) string {
 }
 
 func formatMaintainer(n *ExtendedNode, c *Config) string {
-	maintainer := strings.Trim(n.Next.Value, "\"")
+	maintainer := n.Next.Value
+	// A value wrapped in one pair of quotes ("Jane Doe") already reads as
+	// quoted, so drop that pair as before.
+	if len(maintainer) >= 2 && maintainer[0] == '"' && maintainer[len(maintainer)-1] == '"' &&
+		!strings.Contains(maintainer[1:len(maintainer)-1], `"`) {
+		maintainer = maintainer[1 : len(maintainer)-1]
+	}
+	// MAINTAINER takes the raw rest of the line, so escape what would
+	// break the double-quoted LABEL value.
+	maintainer = strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(maintainer)
 	return "LABEL org.opencontainers.image.authors=\"" + maintainer + "\"\n"
 }
 
