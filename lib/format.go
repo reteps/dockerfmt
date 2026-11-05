@@ -291,7 +291,7 @@ func formatEnv(n *ExtendedNode, c *Config) string {
 
 	// Only the legacy format will have an empty 3rd child
 	if n.Next.Next.Next.Value == "" {
-		return n.directive() + " " + n.Next.Value + "=" + n.Next.Next.Value + "\n"
+		return formatLegacyEnv(n.directive(), n.Next.Value, n.Next.Next.Value)
 	}
 
 	// Otherwise, we have a valid env command; fall back to original if parsing fails
@@ -303,6 +303,29 @@ func formatEnv(n *ExtendedNode, c *Config) string {
 	// Indent all lines with indentSize spaces
 	content = strings.Trim(reLeadingSpaces.ReplaceAllString(content, strings.Repeat(" ", int(c.IndentSize))), " ")
 	return n.directive() + " " + content
+}
+
+// formatLegacyEnv converts the legacy `ENV key value` form to `key=value`.
+// In the legacy form everything after the key is the value, so a value with
+// whitespace must be quoted in the new form or it would be read as more pairs.
+func formatLegacyEnv(directive, key, value string) string {
+	if !strings.ContainsAny(value, " \t") || isSingleQuoted(value) {
+		return directive + " " + key + "=" + value + "\n"
+	}
+	// Quotes or backslashes inside a value with spaces can't be re-quoted
+	// without changing what it means, so keep the legacy form (still valid).
+	if strings.ContainsAny(value, "\"'\\") {
+		return directive + " " + key + " " + value + "\n"
+	}
+	return directive + " " + key + "=\"" + value + "\"\n"
+}
+
+// isSingleQuoted reports whether s is one token wrapped in matching quotes.
+func isSingleQuoted(s string) bool {
+	if len(s) < 2 || (s[0] != '"' && s[0] != '\'') || s[len(s)-1] != s[0] {
+		return false
+	}
+	return !strings.ContainsAny(s[1:len(s)-1], string(s[0])+"\\")
 }
 
 func formatShell(content string, hereDoc bool, c *Config) string {

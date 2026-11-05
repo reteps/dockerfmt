@@ -352,6 +352,31 @@ func TestPerDirective(t *testing.T) {
 			"FROM alpine\nENV MY_VAR=my-value\n",
 		},
 		{
+			"ENV legacy value with spaces is quoted",
+			"FROM alpine\nENV JAVA_OPTS -Xms256m -Xmx512m\n",
+			"FROM alpine\nENV JAVA_OPTS=\"-Xms256m -Xmx512m\"\n",
+		},
+		{
+			"ENV legacy value with tabs and repeated spaces",
+			"FROM alpine\nENV A one\t two   three\n",
+			"FROM alpine\nENV A=\"one\t two   three\"\n",
+		},
+		{
+			"ENV legacy value with variable",
+			"FROM alpine\nENV PATH $PATH:/opt/bin /usr/x\n",
+			"FROM alpine\nENV PATH=\"$PATH:/opt/bin /usr/x\"\n",
+		},
+		{
+			"ENV legacy already quoted value",
+			"FROM alpine\nENV A \"one two\"\n",
+			"FROM alpine\nENV A=\"one two\"\n",
+		},
+		{
+			"ENV legacy value with embedded quotes stays legacy",
+			"FROM alpine\nENV A say \"hi\" there\n",
+			"FROM alpine\nENV A say \"hi\" there\n",
+		},
+		{
 			"ENV modern format",
 			"FROM alpine\nENV MY_VAR=my-value\n",
 			"FROM alpine\nENV MY_VAR=my-value\n",
