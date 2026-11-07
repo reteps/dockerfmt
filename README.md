@@ -71,6 +71,7 @@ RUN apt-get update \
 - Converts legacy `ENV` syntax (`ENV key value` → `ENV key=value`)
 - Upgrades deprecated directives (`MAINTAINER` → `LABEL`)
 - Supports heredocs in `RUN` steps
+- Keeps the file's line endings: CRLF files stay CRLF (a file with mixed line endings gets its most common one)
 - Reads from files or stdin
 - Pre-commit hook support
 - JS/WASM bindings for Node.js ([docs](js/README.md))
