@@ -12,9 +12,7 @@ import (
 
 // expectedFallbacks lists fixtures with instructions the formatter can't yet
 // format without changing their meaning, so they are left as written.
-var expectedFallbacks = map[string]bool{
-	"label.dockerfile": true, // quoted multi-line ENV value, #78
-}
+var expectedFallbacks = map[string]bool{}
 
 func TestFormatter(t *testing.T) {
 	// assert equality
