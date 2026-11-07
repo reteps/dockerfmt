@@ -34,18 +34,28 @@ export const formatDockerfileContents = async (
         indent: number,
         trailingNewline: boolean,
         spaceRedirects: boolean,
-    ) => string
+    ) => string | Error
 
     if (typeof formatBytes !== 'function') {
         throw new Error('dockerfmt WASM module did not register formatBytes')
     }
 
-    return formatBytes(
-        fileContents,
+    // wasm_exec.js decodes strings returned by Go with a TextDecoder that
+    // drops a leading byte order mark, so keep it out of the WASM round trip.
+    const bom = fileContents.startsWith('﻿') ? '﻿' : ''
+
+    // The WASM side returns an Error, rather than throwing, when the input
+    // can't be formatted (not UTF-8, or a Dockerfile parse error).
+    const result = formatBytes(
+        fileContents.slice(bom.length),
         options.indent,
         options.trailingNewline,
         options.spaceRedirects,
     )
+    if (typeof result !== 'string') {
+        throw result
+    }
+    return bom + result
 }
 
 export const formatDockerfile = () => {

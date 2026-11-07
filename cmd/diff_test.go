@@ -1,8 +1,8 @@
 package cmd
 
 import (
+	"bytes"
 	"io"
-	"os"
 	"testing"
 
 	"github.com/reteps/dockerfmt/lib"
@@ -14,18 +14,14 @@ import (
 // printed and whether the input was already formatted.
 func captureProcessInput(t *testing.T, name, input string, trailingNewline bool) (string, bool) {
 	t.Helper()
-	oldCheck, oldDiff, oldStdout := checkFlag, diffFlag, os.Stdout
-	t.Cleanup(func() { checkFlag, diffFlag, os.Stdout = oldCheck, oldDiff, oldStdout })
+	oldCheck, oldDiff := checkFlag, diffFlag
+	t.Cleanup(func() { checkFlag, diffFlag = oldCheck, oldDiff })
 	checkFlag, diffFlag = true, true
 
-	r, w, err := os.Pipe()
+	var out bytes.Buffer
+	formatted, err := processInput(name, []byte(input), &lib.Config{IndentSize: 4, TrailingNewline: trailingNewline}, &out, io.Discard)
 	require.NoError(t, err)
-	os.Stdout = w
-	formatted := processInput(name, []byte(input), &lib.Config{IndentSize: 4, TrailingNewline: trailingNewline})
-	require.NoError(t, w.Close())
-	out, err := io.ReadAll(r)
-	require.NoError(t, err)
-	return string(out), formatted
+	return out.String(), formatted
 }
 
 func TestDiffOutput(t *testing.T) {

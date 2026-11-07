@@ -403,7 +403,7 @@ func FormatOnBuild(n *ExtendedNode, c *Config) string {
 func formatLines(fileLines []string, c *Config) (string, error) {
 	result, err := parser.Parse(strings.NewReader(strings.Join(fileLines, "")))
 	if err != nil {
-		return "", err
+		return "", parseError(err)
 	}
 
 	parseState := &ParseState{

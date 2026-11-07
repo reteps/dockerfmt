@@ -200,5 +200,6 @@ repos:
 - The `RUN` formatter does not support command grouping (`{ \`) or unescaped semicolons — these are returned unformatted.
 - The `# escape=X` parser directive is not supported.
 - No line wrapping for long JSON-form commands.
+- Input must be UTF-8 (a UTF-8 byte order mark is kept). Other encodings, such as the UTF-16 that Windows PowerShell's `>` writes by default, are rejected with an error, as are files BuildKit can't parse; dockerfmt then exits non-zero and leaves the file unchanged.
 
 Contributions welcome — please file issues for bugs or feature requests.

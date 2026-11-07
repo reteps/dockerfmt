@@ -11,6 +11,8 @@ const result = await formatDockerfile('../tests/comment.dockerfile', { indent: 4
 console.log(result)
 ```
 
+Both functions reject with an `Error` if the input can't be formatted: it isn't valid UTF-8 (for example a UTF-16 file), or it isn't a valid Dockerfile.
+
 ## CLI
 
 The package also ships the `dockerfmt` CLI.
