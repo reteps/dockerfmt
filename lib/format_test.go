@@ -387,6 +387,31 @@ func TestPerDirective(t *testing.T) {
 			"FROM alpine\nLABEL org.opencontainers.image.authors=\"me\"\n",
 		},
 		{
+			"MAINTAINER with embedded quotes",
+			"FROM alpine\nMAINTAINER Jane Doe \"jane@example.com\"\n",
+			"FROM alpine\nLABEL org.opencontainers.image.authors=\"Jane Doe \\\"jane@example.com\\\"\"\n",
+		},
+		{
+			"MAINTAINER wrapped in one pair of quotes",
+			"FROM alpine\nMAINTAINER \"Jane Doe\"\n",
+			"FROM alpine\nLABEL org.opencontainers.image.authors=\"Jane Doe\"\n",
+		},
+		{
+			"MAINTAINER with backslash",
+			"FROM alpine\nMAINTAINER a\\\\b\n",
+			"FROM alpine\nLABEL org.opencontainers.image.authors=\"a\\\\\\\\b\"\n",
+		},
+		{
+			"MAINTAINER with email in angle brackets",
+			"FROM alpine\nMAINTAINER Jane Doe <jane@example.com>\n",
+			"FROM alpine\nLABEL org.opencontainers.image.authors=\"Jane Doe <jane@example.com>\"\n",
+		},
+		{
+			"MAINTAINER trailing spaces",
+			"FROM alpine\nMAINTAINER me   \n",
+			"FROM alpine\nLABEL org.opencontainers.image.authors=\"me\"\n",
+		},
+		{
 			"CMD JSON form adds spaces",
 			"FROM alpine\nCMD [\"ls\",\"-la\"]\n",
 			"FROM alpine\nCMD [\"ls\", \"-la\"]\n",
