@@ -248,7 +248,7 @@ const maintainerLabel = "org.opencontainers.image.authors"
 
 // formatMaintainer rewrites the deprecated MAINTAINER as the equivalent LABEL.
 func formatMaintainer(n *node, _ *Config) string {
-	if n.hasCommentLines() {
+	if n.next == nil || n.hasCommentLines() {
 		return n.source
 	}
 	// MAINTAINER takes the rest of the line as is, while LABEL processes

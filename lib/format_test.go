@@ -640,6 +640,7 @@ func TestRegressions(t *testing.T) {
 		{"end of flags without flags", "FROM a\nCOPY -- foo /tmp/\n", "FROM a\nCOPY -- foo /tmp/\n"},
 		{"end of flags before JSON", "FROM a\nCMD --doit=true -- [ \"a\" ]\n", "FROM a\nCMD --doit=true -- [\"a\"]\n"},
 		{"empty body", "FROM a\nRUN\n0\n", "FROM a\nRUN\n0\n"},
+		{"MAINTAINER without a value", "FROM a\nMAINTAINER\n", "FROM a\nMAINTAINER\n"},
 		{"separator after the directive line", "FROM a\nRUN \\\n\\\n echo hi\n",
 			"FROM a\nRUN \\\n    \\\n    echo hi\n"},
 		{"trailing comment is not indented", "FROM a\nRUN echo a \\\n#\n", "FROM a\nRUN echo a \\\n#\n"},

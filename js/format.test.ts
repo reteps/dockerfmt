@@ -160,9 +160,10 @@ RUN echo a \\
         )
     })
 
-    // A fallback needs a formatter bug. A MAINTAINER with no value crashes
-    // the formatter; if that is fixed, use another input that falls back.
-    const fallbackInput = 'FROM alpine\n\nMAINTAINER\n'
+    // Mostly "\r\n" line endings, but formatting the file with them would add
+    // a "\r" to each line of the heredoc script, so it is left as written.
+    const fallbackInput =
+        'FROM alpine\r\nRUN  echo a\r\nRUN  echo b\r\nRUN <<EOF\necho x\nEOF\n'
 
     it('instantiates the WASM module once', async () => {
         let loads = 0
@@ -187,8 +188,8 @@ RUN echo a \\
         })
         assert.equal(result, fallbackInput)
         assert.equal(fallbacks.length, 1)
-        assert.equal(fallbacks[0][0], 3)
-        assert.match(fallbacks[0][1], /^formatter error: /)
+        assert.equal(fallbacks[0][0], 4)
+        assert.match(fallbacks[0][1], /line endings/)
     })
 
     it('rejects with the error thrown by onFallback', async () => {
