@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -34,54 +33,71 @@ var rootCmd = &cobra.Command{
 }
 
 func Run(cmd *cobra.Command, args []string) {
+	if code := run(cmd, args); code != 0 {
+		os.Exit(code)
+	}
+}
+
+// run does the work of Run and returns the exit status: 1 if any input
+// couldn't be read or formatted, or (with --check) isn't formatted. An input
+// that can't be formatted is reported on stderr and left alone; the remaining
+// inputs are still processed.
+func run(cmd *cobra.Command, args []string) int {
+	stdout, stderr := cmd.OutOrStdout(), cmd.ErrOrStderr()
 	config := &lib.Config{
 		IndentSize:      indentSize,
 		TrailingNewline: newlineFlag,
 		SpaceRedirects:  spaceRedirects,
 	}
 
-	allFormatted := true
+	allFormatted, failed := true, false
 	if diffFlag {
 		checkFlag = true
+	}
+	process := func(name string, inputBytes []byte, config *lib.Config) {
+		formatted, err := processInput(name, inputBytes, config, stdout, stderr)
+		if err != nil {
+			fmt.Fprintf(stderr, "dockerfmt: %s: %v\n", name, err)
+			failed = true
+		} else if !formatted {
+			allFormatted = false
+		}
 	}
 
 	if len(args) == 0 {
 		if writeFlag {
-			log.Fatal("Error: Cannot use -w/--write flag when reading from stdin")
+			fmt.Fprintln(stderr, "dockerfmt: cannot use -w/--write when reading from stdin")
+			return 1
 		}
 
-		inputBytes, err := io.ReadAll(os.Stdin)
+		inputBytes, err := io.ReadAll(cmd.InOrStdin())
 		if err != nil {
-			log.Fatalf("Failed to read from stdin: %v", err)
+			fmt.Fprintf(stderr, "dockerfmt: failed to read from stdin: %v\n", err)
+			return 1
 		}
 
 		if len(inputBytes) <= 1 {
 			cmd.Help()
-			os.Exit(0)
+			return 0
 		}
 
-		if !processInput("stdin", inputBytes, config) {
-			allFormatted = false // Mark as not formatted if check fails
-		}
-
+		process("stdin", inputBytes, config)
 	} else {
 		for _, fileName := range args {
 			inputBytes, err := os.ReadFile(fileName)
 			if err != nil {
-				log.Fatalf("Failed to read file %s: %v", fileName, err)
+				fmt.Fprintf(stderr, "dockerfmt: %v\n", err)
+				failed = true
+				continue
 			}
-
-			fileConfig := applyEditorConfig(config, fileName, cmd)
-			if !processInput(fileName, inputBytes, fileConfig) {
-				allFormatted = false
-			}
+			process(fileName, inputBytes, applyEditorConfig(config, fileName, cmd))
 		}
 	}
 
-	// If check mode was enabled and any input was not formatted, exit with status 1
-	if checkFlag && !allFormatted {
-		os.Exit(1)
+	if failed || (checkFlag && !allFormatted) {
+		return 1
 	}
+	return 0
 }
 
 // applyEditorConfig returns a Config with editorconfig properties applied for
@@ -119,11 +135,21 @@ func applyEditorConfig(base *lib.Config, filePath string, cmd *cobra.Command) *l
 	return &c
 }
 
-func processInput(inputName string, inputBytes []byte, config *lib.Config) (formatted bool) {
+// processInput formats one input and then prints it, checks it, or writes it
+// back (--write). It reports whether the input was already formatted, which
+// is only ever false when checking. If the input can't be formatted, it
+// returns the error without printing or writing anything.
+func processInput(inputName string, inputBytes []byte, config *lib.Config, stdout, stderr io.Writer) (formatted bool, err error) {
+	c := *config
+	c.OnFallback = func(line int, reason string) {
+		fmt.Fprintf(stderr, "%s:%d: left unformatted: %s\n", inputName, line, reason)
+	}
 	originalContent := string(inputBytes)
-	lines := strings.SplitAfter(strings.TrimSuffix(originalContent, "\n"), "\n")
 
-	formattedContent := lib.FormatFileLines(lines, config)
+	formattedContent, err := lib.Format(originalContent, &c)
+	if err != nil {
+		return false, err
+	}
 
 	if checkFlag {
 		if originalContent != formattedContent {
@@ -138,27 +164,25 @@ func processInput(inputName string, inputBytes []byte, config *lib.Config) (form
 				})
 			}
 			if diff != "" {
-				fmt.Print(strings.ReplaceAll(diff, noNewline+"\n", "\n\\ No newline at end of file\n"))
+				fmt.Fprint(stdout, strings.ReplaceAll(diff, noNewline+"\n", "\n\\ No newline at end of file\n"))
 			} else {
-				fmt.Printf("%s is not formatted\n", inputName)
+				fmt.Fprintf(stdout, "%s is not formatted\n", inputName)
 			}
-			return false
+			return false, nil
 		}
-		return true
+		return true, nil
 	} else if writeFlag {
 		if originalContent != formattedContent {
-			err := os.WriteFile(inputName, []byte(formattedContent), 0644)
-			if err != nil {
-				log.Fatalf("Failed to write to file %s: %v", inputName, err)
+			if err := os.WriteFile(inputName, []byte(formattedContent), 0644); err != nil {
+				return true, fmt.Errorf("failed to write file: %w", err)
 			}
 		}
 	} else {
-		_, err := os.Stdout.Write([]byte(formattedContent))
-		if err != nil {
-			log.Fatalf("Failed to write to stdout: %v", err)
+		if _, err := io.WriteString(stdout, formattedContent); err != nil {
+			return true, fmt.Errorf("failed to write to stdout: %w", err)
 		}
 	}
-	return true
+	return true, nil
 }
 
 // noNewline marks a final line lacking "\n" so difflib sees it as different from the same line with one.

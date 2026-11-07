@@ -9,25 +9,29 @@
 package main
 
 import (
-	"strings"
 	"syscall/js"
 
 	"github.com/reteps/dockerfmt/lib"
 )
 
+// formatBytes returns the formatted Dockerfile as a string, or a JS Error if
+// it can't be formatted (format.ts throws it).
 func formatBytes(_ js.Value, args []js.Value) any {
 	contents := args[0].String()
 	indentSize := uint(args[1].Int())
 	newlineFlag := args[2].Bool()
 	spaceRedirects := args[3].Bool()
 
-	originalLines := strings.SplitAfter(contents, "\n")
 	c := &lib.Config{
 		IndentSize:      indentSize,
 		TrailingNewline: newlineFlag,
 		SpaceRedirects:  spaceRedirects,
 	}
-	return lib.FormatFileLines(originalLines, c)
+	out, err := lib.Format(contents, c)
+	if err != nil {
+		return js.Global().Get("Error").New(err.Error())
+	}
+	return out
 }
 
 func main() {

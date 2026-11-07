@@ -121,37 +121,6 @@ func TestMarshalJSONStringArray(t *testing.T) {
 	}
 }
 
-// --- unmarshalJSONStringArray ---
-
-func TestUnmarshalJSONStringArray(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected []string
-		ok       bool
-	}{
-		{"simple array", `["a", "b"]`, []string{"a", "b"}, true},
-		{"no spaces", `["a","b"]`, []string{"a", "b"}, true},
-		{"empty array", `[]`, []string{}, true},
-		{"single item", `["hello"]`, []string{"hello"}, true},
-		{"with escapes", `["say \"hi\""]`, []string{`say "hi"`}, true},
-		{"not json", `echo hello`, nil, false},
-		{"not array", `"hello"`, nil, false},
-		{"mixed types", `["a", 1]`, nil, false},
-		{"nested array", `[["a"]]`, nil, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, ok := unmarshalJSONStringArray(tt.input)
-			assert.Equal(t, tt.ok, ok)
-			if ok {
-				assert.Equal(t, tt.expected, result)
-			}
-		})
-	}
-}
-
 // --- formatBash ---
 
 func TestFormatBash(t *testing.T) {
@@ -240,6 +209,55 @@ func TestFormatShell(t *testing.T) {
 			"echo hi\necho bye\n",
 		},
 		{
+			"printer splitting statements bails out",
+			"if true; then \\\n  echo a; echo b; fi",
+			false,
+			defaultConfig,
+			"if true; then \\\n  echo a; echo b; fi",
+		},
+		{
+			"comment before operator keeps argument indentation",
+			"apt-get install -y \\\n  curl \\\n  # note\n  && rm -rf x",
+			false,
+			defaultConfig,
+			"apt-get install -y \\\n    curl \\\n    # note\n    && rm -rf x\n",
+		},
+		{
+			"comment before operand of trailing operator",
+			"a && \\\n  # note\n  b",
+			false,
+			defaultConfig,
+			"a \\\n    # note\n    && b\n",
+		},
+		{
+			"comment on first line gets a continuation",
+			"\\\n  # note\n  echo hi",
+			false,
+			defaultConfig,
+			"\\\n    # note\n    echo hi\n",
+		},
+		{
+			"blank line inside continuation is dropped",
+			"apk add \\\n    curl \\\n\n    git",
+			false,
+			defaultConfig,
+			"apk add \\\n    curl \\\n    git\n",
+		},
+		{
+			"comment between arguments",
+			"apk add \\\n    curl \\\n    # vcs\n    git",
+			false,
+			defaultConfig,
+			"apk add \\\n    curl \\\n    # vcs\n    git\n",
+		},
+		{
+			"unparseable shell is left as written",
+			"echo $((",
+			false,
+			defaultConfig,
+			"echo $((",
+		},
+		{
 			"space redirects passed through",
 			"echo foo >>bar",
 			false,
@@ -250,7 +268,12 @@ func TestFormatShell(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := formatShell(tt.content, tt.hereDoc, tt.config)
+			var result string
+			if tt.hereDoc {
+				result = formatHeredocScript(tt.content, tt.config)
+			} else {
+				result = formatShellBody(tt.content, tt.config)
+			}
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -352,6 +375,31 @@ func TestPerDirective(t *testing.T) {
 			"FROM alpine\nENV MY_VAR=my-value\n",
 		},
 		{
+			"ENV legacy value with spaces is quoted",
+			"FROM alpine\nENV JAVA_OPTS -Xms256m -Xmx512m\n",
+			"FROM alpine\nENV JAVA_OPTS=\"-Xms256m -Xmx512m\"\n",
+		},
+		{
+			"ENV legacy value with tabs and repeated spaces",
+			"FROM alpine\nENV A one\t two   three\n",
+			"FROM alpine\nENV A=\"one\t two   three\"\n",
+		},
+		{
+			"ENV legacy value with variable",
+			"FROM alpine\nENV PATH $PATH:/opt/bin /usr/x\n",
+			"FROM alpine\nENV PATH=\"$PATH:/opt/bin /usr/x\"\n",
+		},
+		{
+			"ENV legacy already quoted value",
+			"FROM alpine\nENV A \"one two\"\n",
+			"FROM alpine\nENV A=\"one two\"\n",
+		},
+		{
+			"ENV legacy value with embedded quotes stays legacy",
+			"FROM alpine\nENV A say \"hi\" there\n",
+			"FROM alpine\nENV A say \"hi\" there\n",
+		},
+		{
 			"ENV modern format",
 			"FROM alpine\nENV MY_VAR=my-value\n",
 			"FROM alpine\nENV MY_VAR=my-value\n",
@@ -359,6 +407,36 @@ func TestPerDirective(t *testing.T) {
 		{
 			"MAINTAINER converted to LABEL",
 			"FROM alpine\nMAINTAINER me\n",
+			"FROM alpine\nLABEL org.opencontainers.image.authors=\"me\"\n",
+		},
+		{
+			"MAINTAINER with embedded quotes",
+			"FROM alpine\nMAINTAINER Jane Doe \"jane@example.com\"\n",
+			"FROM alpine\nLABEL org.opencontainers.image.authors=\"Jane Doe \\\"jane@example.com\\\"\"\n",
+		},
+		{
+			"MAINTAINER wrapped in one pair of quotes",
+			"FROM alpine\nMAINTAINER \"Jane Doe\"\n",
+			"FROM alpine\nLABEL org.opencontainers.image.authors=\"Jane Doe\"\n",
+		},
+		{
+			"MAINTAINER with backslash",
+			"FROM alpine\nMAINTAINER a\\\\b\n",
+			"FROM alpine\nLABEL org.opencontainers.image.authors=\"a\\\\\\\\b\"\n",
+		},
+		{
+			"MAINTAINER with variable is not expanded by LABEL",
+			"FROM alpine\nMAINTAINER $USER\n",
+			"FROM alpine\nLABEL org.opencontainers.image.authors=\"\\$USER\"\n",
+		},
+		{
+			"MAINTAINER with email in angle brackets",
+			"FROM alpine\nMAINTAINER Jane Doe <jane@example.com>\n",
+			"FROM alpine\nLABEL org.opencontainers.image.authors=\"Jane Doe <jane@example.com>\"\n",
+		},
+		{
+			"MAINTAINER trailing spaces",
+			"FROM alpine\nMAINTAINER me   \n",
 			"FROM alpine\nLABEL org.opencontainers.image.authors=\"me\"\n",
 		},
 		{
@@ -585,4 +663,80 @@ func TestIgnoreDirective(t *testing.T) {
 	output := FormatFileLines(input, defaultConfig)
 	expected := "FROM scratch\n# dockerfmt-ignore\nRUN   echo   hello\nRUN echo world\n"
 	assert.Equal(t, expected, output)
+}
+
+// --- Empty continuation lines and the flags region (issue #59) ---
+
+// firstRunNode parses input and returns the node for its first RUN.
+func firstRunNode(t *testing.T, input string) *ExtendedNode {
+	t.Helper()
+	lines := strings.SplitAfter(input, "\n")
+	result, err := parser.Parse(strings.NewReader(input))
+	require.NoError(t, err)
+	root := BuildExtendedNode(result.AST, lines)
+	for _, child := range root.Children {
+		if child.directive() == "RUN" {
+			return child
+		}
+	}
+	t.Fatal("no RUN directive")
+	return nil
+}
+
+func TestScanFlagsRegion(t *testing.T) {
+	f := func(s string) flagsRegionItem { return flagsRegionItem{s, regionFlag} }
+	c := func(s string) flagsRegionItem { return flagsRegionItem{s, regionComment} }
+	sep := flagsRegionItem{"\\", regionEmptyContinuation}
+
+	tests := []struct {
+		name   string
+		input  string
+		want   []flagsRegionItem
+		wantOK bool
+	}{
+		{"no flags", "FROM a\nRUN \\\n  \\\n  echo\n", nil, false},
+		{"flags on one line", "FROM a\nRUN --network=host --mount=type=cache,target=/a echo\n",
+			[]flagsRegionItem{f("--network=host"), f("--mount=type=cache,target=/a")}, true},
+		{"leading continuation is not a separator", "FROM a\nRUN \\\n  --network=host \\\n  echo\n",
+			[]flagsRegionItem{f("--network=host")}, true},
+		{"separator after last flag", "FROM a\nRUN --network=host \\\n  \\\n  echo\n",
+			[]flagsRegionItem{f("--network=host"), sep}, true},
+		{"comment before first flag", "FROM a\nRUN \\\n  # why \\\n  --network=host \\\n  echo\n",
+			[]flagsRegionItem{c("# why \\"), f("--network=host")}, true},
+		{"comment and separator between flags", "FROM a\nRUN --mount=type=cache,target=/a \\\n  # c\n  \\\n  --network=host \\\n  echo\n",
+			[]flagsRegionItem{f("--mount=type=cache,target=/a"), c("# c"), sep, f("--network=host")}, true},
+		{"comment after last flag belongs to content", "FROM a\nRUN --network=host \\\n  # c\n  echo\n",
+			[]flagsRegionItem{f("--network=host")}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := scanFlagsRegion(firstRunNode(t, tt.input))
+			assert.Equal(t, tt.wantOK, ok)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestIsEmptyContinuation(t *testing.T) {
+	tests := []struct {
+		name  string
+		lines []string
+		i     int
+		want  bool
+	}{
+		{"directive tail", []string{"\\\n", "  echo\n"}, 0, false},
+		{"indented", []string{"echo a \\\n", "  \\\n", "  && echo b\n"}, 1, true},
+		{"trailing whitespace", []string{"echo a \\\n", "  \\  \n", "  && echo b\n"}, 1, true},
+		{"space before previous backslash", []string{"echo a \\\n", "\\\n", "&& echo b\n"}, 1, true},
+		{"next line indented", []string{"echo a\\\n", "\\\n", "  b\n"}, 1, true},
+		{"after comment", []string{"echo a \\\n", "# c\n", "\\\n", "b\n"}, 2, true},
+		{"joins a word", []string{"echo good\\\n", "\\\n", "night\n"}, 1, false},
+		{"last line", []string{"echo a \\\n", "  \\\n"}, 1, false},
+		{"not a backslash line", []string{"echo a \\\n", "  b \\\n", "  c\n"}, 1, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isEmptyContinuation(tt.lines, tt.i))
+		})
+	}
 }

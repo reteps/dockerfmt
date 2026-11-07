@@ -3,25 +3,19 @@ package lib
 import (
 	"bytes"
 	"fmt"
-	"log"
 	"os"
 	"regexp"
 	"slices"
 	"strings"
 
-	"github.com/google/shlex"
 	"github.com/moby/buildkit/frontend/dockerfile/command"
 	"github.com/moby/buildkit/frontend/dockerfile/parser"
 	"mvdan.cc/sh/v3/syntax"
 )
 
 var (
-	reWhitespace          = regexp.MustCompile(`[ \t]`)
-	reLeadingSpaces       = regexp.MustCompile(`(?m)^ *`)
-	reUnescapedSemicolon  = regexp.MustCompile(`[^\\];`)
-	reCommentContinuation = regexp.MustCompile(`(\\(?:\s*` + "`#.*#`" + `\\){1,}\s*)&&(.[^\\])`)
-	reBacktickComment     = regexp.MustCompile(`([ \t]*)(?:&& )?` + "`(#.*)#` " + `\\`)
-	reMultipleNewlines    = regexp.MustCompile(`\n{3,}`)
+	reWhitespace       = regexp.MustCompile(`[ \t]`)
+	reMultipleNewlines = regexp.MustCompile(`\n{3,}`)
 )
 
 type ExtendedNode struct {
@@ -29,6 +23,16 @@ type ExtendedNode struct {
 	Children          []*ExtendedNode
 	Next              *ExtendedNode
 	OriginalMultiline string
+	// ctx is the file-level state the instruction is interpreted in; nil
+	// means the defaults (backslash escape, POSIX shell).
+	ctx *instrContext
+}
+
+func (n *ExtendedNode) context() instrContext {
+	if n.ctx == nil {
+		return defaultContext()
+	}
+	return *n.ctx
 }
 
 type ParseState struct {
@@ -37,12 +41,18 @@ type ParseState struct {
 	// Needed to pull in comments
 	AllOriginalLines []string
 	Config           *Config
+	// ctx tracks file-level state (escape character, current SHELL).
+	ctx instrContext
 }
 
 type Config struct {
 	IndentSize      uint
 	TrailingNewline bool
 	SpaceRedirects  bool
+	// OnFallback, if set, is called when an instruction is left unformatted
+	// because formatting it would have changed its meaning (or the formatter
+	// failed). line is the instruction's 1-based start line.
+	OnFallback func(line int, reason string)
 }
 
 // hasIgnoreComment reports whether any line in the block is a "# dockerfmt-ignore" comment.
@@ -80,10 +90,140 @@ func prependFlagsImpl(flags []string, content string, c *Config, multiline bool)
 			b.WriteString(" \\\n")
 			b.WriteString(indent)
 		}
-		b.WriteString(content)
+		b.WriteString(trimLeadingContinuation(content))
 		return b.String()
 	}
 	return strings.Join(flags, " ") + " " + content
+}
+
+// trimLeadingContinuation drops a leading "\" line continuation (and the
+// indentation after it) from content. Formatted shell content starts with one
+// when its first line is a comment, so it doesn't merge into the directive
+// line; after a flag that already ends in " \", it would be redundant.
+func trimLeadingContinuation(content string) string {
+	if rest, ok := strings.CutPrefix(content, "\\\n"); ok {
+		return strings.TrimLeft(rest, " \t")
+	}
+	return content
+}
+
+// flagsRegionItem is one line-level element between a directive keyword and
+// its content: a flag, a comment line, or an empty continuation line ("\").
+type flagsRegionItem struct {
+	text string
+	kind flagsRegionKind
+}
+
+type flagsRegionKind int
+
+const (
+	regionFlag flagsRegionKind = iota
+	regionComment
+	regionEmptyContinuation
+)
+
+// scanFlagsRegion walks the original source of n from the directive keyword
+// through its flags (n.Flags, in order) and returns the flags interleaved with
+// any comment lines and empty continuation lines ("\" alone on a line) found
+// among them, plus empty continuation lines directly after the last flag. The
+// buildkit parser drops these, so this recovers them from the source.
+//
+// ok is false if the flags can't be located in the source, in which case the
+// caller should fall back to n.Flags.
+func scanFlagsRegion(n *ExtendedNode) (items []flagsRegionItem, ok bool) {
+	if len(n.Flags) == 0 {
+		// Without flags, everything after the keyword is content.
+		return nil, false
+	}
+	rest := n.OriginalMultiline
+	if rest == "" {
+		rest = n.Original
+	}
+	rest = strings.TrimLeft(rest, " \t")
+	// Skip the directive keyword.
+	if i := strings.IndexAny(rest, " \t\\\n"); i >= 0 {
+		rest = rest[i:]
+	} else {
+		return nil, false
+	}
+
+	flags := n.Flags
+	atLineStart := false // whether rest begins a new physical line
+	for {
+		rest = strings.TrimLeft(rest, " \t")
+		switch {
+		case strings.HasPrefix(rest, "\\\n"):
+			if atLineStart {
+				items = append(items, flagsRegionItem{"\\", regionEmptyContinuation})
+			}
+			rest = rest[2:]
+			atLineStart = true
+			continue
+		case atLineStart && strings.HasPrefix(rest, "\n"):
+			// Blank line inside a continuation; drop it.
+			rest = rest[1:]
+			continue
+		case len(flags) > 0 && atLineStart && strings.HasPrefix(rest, "#"):
+			// Comment line among the flags. Comments after the last flag are
+			// part of the content and handled by the shell formatter.
+			line, after, _ := strings.Cut(rest, "\n")
+			items = append(items, flagsRegionItem{strings.TrimRight(line, " \t"), regionComment})
+			rest = after
+			continue
+		case len(flags) > 0 && strings.HasPrefix(rest, flags[0]):
+			items = append(items, flagsRegionItem{flags[0], regionFlag})
+			rest = rest[len(flags[0]):]
+			flags = flags[1:]
+			atLineStart = false
+			continue
+		}
+		break
+	}
+	if len(flags) > 0 {
+		return nil, false
+	}
+	return items, true
+}
+
+// prependFlagsRegion is like prependFlags, but also re-emits the comment lines
+// and empty continuation lines found among the flags. Each item goes on its own
+// line. It returns ok=false when there is nothing beyond the flags themselves,
+// so callers keep their usual flag layout.
+func prependFlagsRegion(n *ExtendedNode, content string, c *Config) (string, bool) {
+	items, ok := scanFlagsRegion(n)
+	if !ok {
+		return "", false
+	}
+	extra := false
+	for _, item := range items {
+		if item.kind != regionFlag {
+			extra = true
+			break
+		}
+	}
+	if !extra {
+		return "", false
+	}
+
+	indent := strings.Repeat(" ", int(c.IndentSize))
+	var b strings.Builder
+	if items[0].kind != regionFlag {
+		// A comment or "\" can't share the directive line.
+		b.WriteString("\\\n")
+		b.WriteString(indent)
+	}
+	for _, item := range items {
+		b.WriteString(item.text)
+		switch item.kind {
+		case regionFlag:
+			b.WriteString(" \\\n")
+		default:
+			b.WriteString("\n")
+		}
+		b.WriteString(indent)
+	}
+	b.WriteString(trimLeadingContinuation(content))
+	return b.String(), true
 }
 
 // hasLineContinuation reports whether the node's original source spanned multiple
@@ -194,10 +334,16 @@ func (df *ParseState) processNode(ast *ExtendedNode) {
 		// # dockerfmt-ignore: emit the directive verbatim.
 		df.Output += ast.OriginalMultiline
 		df.CurrentLine = ast.EndLine
-	} else if output, ok := FormatNode(ast, df.Config); ok {
+	} else if output, ok := df.formatChecked(ast); ok {
 		df.Output += output
 		df.CurrentLine = ast.EndLine
+	} else if ast.Value != "" { // the root node has no keyword
+		// No formatter for this instruction (e.g. a misspelled keyword,
+		// which BuildKit only rejects later): keep it exactly as written.
+		df.Output += ast.OriginalMultiline
+		df.CurrentLine = ast.EndLine
 	}
+	df.ctx.update(ast.Node)
 
 	for _, child := range ast.Children {
 		df.processNode(child)
@@ -208,9 +354,48 @@ func (df *ParseState) processNode(ast *ExtendedNode) {
 	}
 }
 
+// formatChecked formats one instruction and verifies that BuildKit reads the
+// result the same way as the original. If it doesn't, or the formatter fails,
+// the original text is returned unchanged.
+func (df *ParseState) formatChecked(ast *ExtendedNode) (string, bool) {
+	ctx := df.ctx
+	ast.ctx = &ctx
+	output, ok, reason := formatRecovering(ast, df.Config)
+	if !ok {
+		return "", false
+	}
+	if reason == "" && output != ast.OriginalMultiline {
+		if same, why := equivalent(ast.Node, output, ctx); !same {
+			reason = why
+		}
+	}
+	if reason != "" {
+		if df.Config.OnFallback != nil {
+			df.Config.OnFallback(ast.StartLine, reason)
+		}
+		return ast.OriginalMultiline, true
+	}
+	return output, true
+}
+
+// formatRecovering runs FormatNode, turning a panic into a fallback reason.
+func formatRecovering(ast *ExtendedNode, c *Config) (output string, ok bool, reason string) {
+	defer func() {
+		if r := recover(); r != nil {
+			output, ok, reason = "", true, fmt.Sprintf("formatter error: %v", r)
+		}
+	}()
+	output, ok = FormatNode(ast, c)
+	return output, ok, ""
+}
+
 func FormatOnBuild(n *ExtendedNode, c *Config) string {
 	if len(n.Node.Next.Children) == 1 {
-		output, ok := FormatNode(n.Next.Children[0], c)
+		// The trigger runs with the shell this image ends up with, which is
+		// the one in effect here.
+		inner := n.Next.Children[0]
+		inner.ctx = n.ctx
+		output, ok := FormatNode(inner, c)
 		if ok {
 			// Inner directives nested under ONBUILD have StartLine=0, so their
 			// OriginalMultiline is empty and formatters that fall back to n.Original
@@ -225,16 +410,21 @@ func FormatOnBuild(n *ExtendedNode, c *Config) string {
 	return n.OriginalMultiline
 }
 
-func FormatFileLines(fileLines []string, c *Config) string {
+// formatLines formats a Dockerfile given as "\n"-terminated lines. Line
+// endings must already be normalized; see formatContent.
+func formatLines(fileLines []string, c *Config) (string, error) {
 	result, err := parser.Parse(strings.NewReader(strings.Join(fileLines, "")))
 	if err != nil {
-		log.Printf("%s\n", strings.Join(fileLines, ""))
-		log.Fatalf("Error parsing file: %v", err)
+		return "", parseError(err)
 	}
 
 	parseState := &ParseState{
 		AllOriginalLines: fileLines,
 		Config:           c,
+		ctx:              defaultContext(),
+	}
+	if result.EscapeToken != 0 {
+		parseState.ctx.escape = result.EscapeToken
 	}
 	rootNode := BuildExtendedNode(result.AST, fileLines)
 	parseState.processNode(rootNode)
@@ -248,7 +438,7 @@ func FormatFileLines(fileLines []string, c *Config) string {
 	if c.TrailingNewline {
 		parseState.Output += "\n"
 	}
-	return parseState.Output
+	return parseState.Output, nil
 }
 
 // BuildExtendedNode wraps a parser.Node tree, attaching the original multiline
@@ -291,7 +481,7 @@ func formatEnv(n *ExtendedNode, c *Config) string {
 
 	// Only the legacy format will have an empty 3rd child
 	if n.Next.Next.Next.Value == "" {
-		return n.directive() + " " + n.Next.Value + "=" + n.Next.Next.Value + "\n"
+		return formatLegacyEnv(n.directive(), n.Next.Value, n.Next.Next.Value)
 	}
 
 	// Otherwise, we have a valid env command; fall back to original if parsing fails
@@ -299,244 +489,130 @@ func formatEnv(n *ExtendedNode, c *Config) string {
 	if !ok {
 		return n.OriginalMultiline
 	}
-	content := StripWhitespace(rawContent, true)
-	// Indent all lines with indentSize spaces
-	content = strings.Trim(reLeadingSpaces.ReplaceAllString(content, strings.Repeat(" ", int(c.IndentSize))), " ")
-	return n.directive() + " " + content
+	escape := continuationEscape(n.OriginalMultiline)
+	return n.directive() + " " + reindentContinuations(rawContent, c.IndentSize, escape, true)
 }
 
-func formatShell(content string, hereDoc bool, c *Config) string {
-	// TODO: support semicolons in commands
-	if reUnescapedSemicolon.MatchString(content) {
-		return content
+// formatLegacyEnv converts the legacy `ENV key value` form to `key=value`.
+// In the legacy form everything after the key is the value, so a value with
+// whitespace must be quoted in the new form or it would be read as more pairs.
+func formatLegacyEnv(directive, key, value string) string {
+	if !strings.ContainsAny(value, " \t") || isSingleQuoted(value) {
+		return directive + " " + key + "=" + value + "\n"
 	}
-	// Grouped expressions aren't formatted well
-	// See: https://github.com/mvdan/sh/issues/1148
-	if strings.Contains(content, "{ \\") {
-		return content
+	// Quotes or backslashes inside a value with spaces can't be re-quoted
+	// without changing what it means, so keep the legacy form (still valid).
+	if strings.ContainsAny(value, "\"'\\") {
+		return directive + " " + key + " " + value + "\n"
 	}
-
-	if !hereDoc {
-		content = preprocessShellComments(content)
-	}
-
-	content = formatBash(content, c)
-
-	if !hereDoc {
-		content = postprocessShellComments(content, c)
-	}
-
-	return content
+	return directive + " " + key + "=\"" + value + "\"\n"
 }
 
-// preprocessShellComments wraps shell comments in backtick placeholders so they
-// survive shfmt formatting. The placeholder format is `# text#`\, which shfmt
-// treats as a command substitution. Backticks inside comments are backslash-escaped
-// (\`) to nest safely inside the outer backtick delimiters (restored in postprocess).
-//
-// Additionally, when a comment sits between && commands:
-//
-//	cmd1 \
-//	    # comment
-//	    && cmd2
-//
-// the && is moved before the comment block so shfmt sees a continuous chain,
-// and placeholders inside chains get && attached so shfmt doesn't break them apart.
-func preprocessShellComments(content string) string {
-	content = StripWhitespace(content, true)
-	lines := strings.SplitAfter(content, "\n")
-
-	// Step 1: wrap comment lines as backtick placeholders.
-	// Format: `# comment text#`\  — shfmt treats this as a command substitution.
-	for i, line := range lines {
-		trimmed := strings.TrimLeft(line, " \t")
-		if len(trimmed) == 0 || trimmed[0] != '#' {
-			continue
-		}
-		ws := line[:len(line)-len(trimmed)]
-		comment := strings.TrimRight(trimmed, " \t\n")
-		// Escape backticks so they nest safely inside the backtick placeholder.
-		// Inside backtick command substitutions, \` represents a literal backtick.
-		comment = strings.ReplaceAll(comment, "`", "\\`")
-		nl := ""
-		if line[len(line)-1] == '\n' {
-			nl = "\n"
-		}
-		lines[i] = ws + "`" + comment + "#`\\" + nl
+// isSingleQuoted reports whether s is one token wrapped in matching quotes.
+func isSingleQuoted(s string) bool {
+	if len(s) < 2 || (s[0] != '"' && s[0] != '\'') || s[len(s)-1] != s[0] {
+		return false
 	}
-
-	// Step 2: move && before comment blocks.
-	// When we see:  code \<nl> placeholder(s) <nl> && cmd
-	// transform to: code &&\<nl> placeholder(s) <nl> cmd
-	content = strings.Join(lines, "")
-	content = reCommentContinuation.ReplaceAllString(content, "&&$1$2")
-	lines = strings.SplitAfter(content, "\n")
-
-	// Step 3: attach && to placeholders inside && chains so shfmt keeps them
-	// as part of the continuation.
-	inChain := false
-	for i, line := range lines {
-		trimmed := strings.Trim(line, " \t\\\n")
-
-		if strings.HasPrefix(trimmed, "`#") {
-			if inChain {
-				lines[i] = strings.Replace(lines[i], "#`\\", "#`&&\\", 1)
-			}
-			continue
-		}
-
-		inChain = strings.HasSuffix(trimmed, "&&")
-	}
-
-	return strings.Join(lines, "")
-}
-
-// postprocessShellComments restores backtick placeholders to real comments and
-// fixes up their indentation to align with the surrounding code.
-func postprocessShellComments(content string, c *Config) string {
-	// Unwrap placeholders. A placeholder after shfmt looks like:
-	//   <ws><optional && >`# text#` \
-	// The reBacktickComment regex captures the whitespace and comment text.
-	content = reBacktickComment.ReplaceAllString(content, "$1$2")
-
-	// Single pass to fix comment indentation, restore escaped backticks,
-	// and detect leading comments.
-	lines := strings.SplitAfter(content, "\n")
-	indent := strings.Repeat(" ", int(c.IndentSize))
-	prevIsComment := false
-	prevCommentSpacing := ""
-	firstLineIsComment := false
-
-	for i, line := range lines {
-		trimmed := strings.TrimLeft(line, " \t")
-		if len(trimmed) == 0 || trimmed[0] != '#' {
-			prevIsComment = false
-			continue
-		}
-
-		ws := line[:len(line)-len(trimmed)]
-		// Restore backticks that were escaped for the backtick placeholder.
-		trimmed = strings.ReplaceAll(trimmed, "\\`", "`")
-
-		if i == 0 {
-			// First line being a comment means the directive would merge with it
-			// (e.g. "RUN # comment"). We'll insert a continuation before it after the loop.
-			firstLineIsComment = true
-			lines[i] = indent + trimmed
-			prevCommentSpacing = indent
-		} else if prevIsComment {
-			// Consecutive comments share the indentation of the first in the group.
-			lines[i] = prevCommentSpacing + trimmed
-		} else {
-			prevCommentSpacing = ws
-			lines[i] = ws + trimmed
-		}
-		prevIsComment = true
-	}
-
-	if firstLineIsComment {
-		lines = slices.Insert(lines, 0, "\\\n")
-	}
-
-	return strings.Join(lines, "")
+	return !strings.ContainsAny(s[1:len(s)-1], string(s[0])+"\\")
 }
 
 func formatRun(n *ExtendedNode, c *Config) string {
-	hereDoc := false
 	flags := n.Flags
+	ctx := n.context()
 
 	var content string
-	if len(n.Heredocs) >= 1 {
-		content = n.Heredocs[0].Content
-		hereDoc = true
-	} else {
+	switch {
+	case len(n.Heredocs) > 0:
+		// Only a heredoc the shell runs as a script ("RUN <<EOF") is shell;
+		// a heredoc fed to another program is data and stays as written.
+		var script *string
+		if isShellScriptHeredoc(n.Node, ctx) && ctx.escape == '\\' {
+			formatted := formatHeredocScript(n.Heredocs[0].Content, c)
+			script = &formatted
+		}
+		content, _ = getHeredoc(n, script)
+	case n.Attributes["json"]:
+		content = marshalJSONStringArray(jsonArgs(n.Next)) + "\n"
+	default:
 		content, _ = extractDirectiveContent(n, len(flags))
-	}
-
-	if jsonItems, ok := unmarshalJSONStringArray(content); ok {
-		content = marshalJSONStringArray(jsonItems) + "\n"
-	} else {
-		content = formatShell(content, hereDoc, c)
-		if hereDoc {
-			n.Heredocs[0].Content = content
-			content, _ = GetHeredoc(n)
+		if ctx.formatsShell() {
+			content = formatShellBody(content, c)
 		}
 	}
 
+	if out, ok := prependFlagsRegion(n, content, c); ok {
+		return n.directive() + " " + out
+	}
 	return n.directive() + " " + prependFlags(flags, content, c)
 }
 
+// GetHeredoc returns the directive's arguments followed by every heredoc body
+// and terminator, as written.
 func GetHeredoc(n *ExtendedNode) (string, bool) {
+	return getHeredoc(n, nil)
+}
+
+// getHeredoc is GetHeredoc, with the first body replaced by firstBody if set.
+func getHeredoc(n *ExtendedNode, firstBody *string) (string, bool) {
 	if len(n.Heredocs) == 0 {
 		return "", false
 	}
 
 	args := []string{}
-	cur := n.Next
-	for cur != nil {
+	for cur := n.Next; cur != nil; cur = cur.Next {
 		if cur.Value != "" {
 			args = append(args, cur.Value)
 		}
-		cur = cur.Next
 	}
-	content := strings.Join(args, " ") + "\n" + n.Heredocs[0].Content + n.Heredocs[0].Name + "\n"
-	return content, true
-}
-func formatBasic(n *ExtendedNode, c *Config) string {
-	value, success := GetHeredoc(n)
-	if !success {
-		rawContent, ok := extractDirectiveContent(n, 0)
-		if !ok {
-			return n.directive() + "\n"
+	var b strings.Builder
+	b.WriteString(strings.Join(args, " ") + "\n")
+	for i, h := range n.Heredocs {
+		body := h.Content
+		if i == 0 && firstBody != nil {
+			body = *firstBody
 		}
-		value = strings.TrimLeft(rawContent, " \t")
+		b.WriteString(body + h.Name + "\n")
 	}
-	return IndentFollowingLines(n.directive()+" "+value, c.IndentSize)
+	return b.String(), true
 }
 
-func getCmd(n *ExtendedNode, shouldSplitNode bool) []string {
-	cmd := []string{}
-	for node := n; node != nil; node = node.Next {
-		// Split value by whitespace
-		rawValue := strings.Trim(node.Value, " \t")
-		if len(node.Flags) > 0 {
-			cmd = append(cmd, node.Flags...)
-		}
-		if shouldSplitNode {
-			parts, err := shlex.Split(rawValue)
-			if err != nil {
-				log.Fatalf("Error splitting: %s\n", node.Value)
-			}
-			cmd = append(cmd, parts...)
-		} else {
-			cmd = append(cmd, rawValue)
-		}
+func formatBasic(n *ExtendedNode, c *Config) string {
+	if value, ok := GetHeredoc(n); ok {
+		return IndentFollowingLines(n.directive()+" "+value, c.IndentSize)
 	}
-	return cmd
+	rawContent, ok := extractDirectiveContent(n, 0)
+	if !ok {
+		return n.directive() + "\n"
+	}
+	escape := continuationEscape(n.OriginalMultiline)
+	return n.directive() + " " + reindentContinuations(rawContent, c.IndentSize, escape, false)
+}
+
+// shellFormArgs returns the arguments of a space-separated directive.
+func shellFormArgs(n *ExtendedNode) []string {
+	args := []string{}
+	for node := n; node != nil; node = node.Next {
+		args = append(args, node.Flags...)
+		args = append(args, strings.Trim(node.Value, " \t"))
+	}
+	return args
 }
 
 func formatCmd(n *ExtendedNode, c *Config) string {
-	isJSON := n.Attributes["json"]
-
 	flags := n.Flags
+	if n.Attributes["json"] {
+		// BuildKit decides what is JSON: an argument list it can't decode
+		// (like ["a",]) is shell form, and must stay that way.
+		return n.directive() + " " + prependFlags(flags, marshalJSONStringArray(jsonArgs(n.Next))+"\n", c)
+	}
 	content, ok := extractDirectiveContent(n, len(flags))
 	if !ok && len(flags) > 0 {
 		return n.directive() + "\n"
 	}
-
-	// If JSON form (attribute or decodable), format as JSON array with spaces
-	jsonItems, jsonOK := unmarshalJSONStringArray(content)
-	if isJSON || jsonOK {
-		items := getCmd(n.Next, false)
-		if !isJSON && len(items) == 0 {
-			items = jsonItems
-		}
-		return n.directive() + " " + marshalJSONStringArray(items) + "\n"
+	if n.context().formatsShell() {
+		content = formatShellBody(content, c)
 	}
-
-	// Otherwise, format as shell command
-	shell := formatShell(content, false, c)
-	return n.directive() + " " + prependFlags(flags, shell, c)
+	return n.directive() + " " + prependFlags(flags, content, c)
 }
 
 // multilineMode controls how a space-separated directive that the author wrote
@@ -561,23 +637,86 @@ func spaceSeparated(mode multilineMode) func(*ExtendedNode, *Config) string {
 	return func(n *ExtendedNode, c *Config) string {
 		isJSON := n.Attributes["json"]
 		cmd, success := GetHeredoc(n)
-		if !success {
+		if success {
+			// The flags go on the heredoc's header line.
+			cmd = prependFlagsImpl(n.Flags, cmd, c, false)
+		} else {
 			argSep := " "
 			if mode == argsOnOwnLines && hasLineContinuation(n) {
 				argSep = " \\\n" + strings.Repeat(" ", int(c.IndentSize))
 			}
-			content := strings.Join(getCmd(n.Next, isJSON), argSep)
+			var content string
+			switch args := jsonArgs(n.Next); {
+			case isJSON && !safeAsShellWords(args):
+				// The JSON form is the only way to pass these arguments.
+				content = marshalJSONStringArray(args)
+			case isJSON:
+				// BuildKit processes each argument the same way in both
+				// forms; only the splitting on whitespace differs.
+				content = strings.Join(args, argSep)
+			default:
+				content = strings.Join(shellFormArgs(n.Next), argSep)
+			}
+			flags := n.Flags
+			if hasEndOfFlags(n) {
+				// "--" ends the flags, so a source may start with "--".
+				flags = append(slices.Clone(flags), "--")
+			}
 			flagsMultiline := mode == flagsOnOwnLines && (hasLineContinuation(n) || hasMountFlag(n.Flags))
-			cmd = prependFlagsImpl(n.Flags, content, c, flagsMultiline) + "\n"
+			cmd = prependFlagsImpl(flags, content, c, flagsMultiline) + "\n"
 		}
 
 		return n.directive() + " " + cmd
 	}
 }
 
+// hasEndOfFlags reports whether the instruction has a "--" right after its
+// flags (BuildKit's parser consumes it).
+func hasEndOfFlags(n *ExtendedNode) bool {
+	fields := strings.Fields(n.Original)
+	i := 1 + len(n.Flags)
+	return i < len(fields) && fields[i] == "--"
+}
+
+// jsonArgs returns the decoded arguments of a JSON-form directive.
+func jsonArgs(n *ExtendedNode) []string {
+	var args []string
+	for node := n; node != nil; node = node.Next {
+		args = append(args, node.Value)
+	}
+	return args
+}
+
+// safeAsShellWords reports whether JSON-form arguments can be written in the
+// space-separated form without changing them. BuildKit splits that form on
+// whitespace, so an argument containing whitespace, or an empty one, needs
+// the JSON form.
+func safeAsShellWords(args []string) bool {
+	for _, a := range args {
+		if a == "" || strings.ContainsAny(a, " \t\n\r\v\f") {
+			return false
+		}
+	}
+	return true
+}
+
 func formatMaintainer(n *ExtendedNode, c *Config) string {
-	maintainer := strings.Trim(n.Next.Value, "\"")
+	maintainer := unwrapMaintainerQuotes(n.Next.Value)
+	// MAINTAINER takes the raw rest of the line, so escape what would
+	// break the double-quoted LABEL value. LABEL also expands variables while
+	// MAINTAINER does not, so "$" must be escaped too.
+	maintainer = strings.NewReplacer(`\`, `\\`, `"`, `\"`, `$`, `\$`).Replace(maintainer)
 	return "LABEL org.opencontainers.image.authors=\"" + maintainer + "\"\n"
+}
+
+// unwrapMaintainerQuotes drops one pair of double quotes wrapping a
+// MAINTAINER value ("Jane Doe"), which already reads as quoted.
+func unwrapMaintainerQuotes(maintainer string) string {
+	if len(maintainer) >= 2 && maintainer[0] == '"' && maintainer[len(maintainer)-1] == '"' &&
+		!strings.Contains(maintainer[1:len(maintainer)-1], `"`) {
+		return maintainer[1 : len(maintainer)-1]
+	}
+	return maintainer
 }
 
 func GetFileLines(fileName string) ([]string, error) {
@@ -637,8 +776,7 @@ func formatBash(s string, c *Config) string {
 	r := strings.NewReader(s)
 	f, err := syntax.NewParser(syntax.KeepComments(true)).Parse(r, "")
 	if err != nil {
-		fmt.Printf("Error parsing: %s\n", s)
-		panic(err)
+		panic(fmt.Errorf("parsing shell: %w", err))
 	}
 	buf := new(bytes.Buffer)
 	syntax.NewPrinter(
