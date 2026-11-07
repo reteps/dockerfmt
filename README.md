@@ -159,6 +159,23 @@ insert_final_newline = true
 > **Note:** EditorConfig is only applied when formatting files by path.
 > It is not used when reading from stdin, since there is no file path to resolve against.
 
+## Safety
+
+dockerfmt never knowingly changes what a Dockerfile does. After formatting each instruction, it parses the result with BuildKit (the parser `docker build` uses) and compares it with the original: ENV/LABEL/ARG values as BuildKit expands them, COPY/ADD sources and destinations, flags, exec-form arrays, heredoc contents, and shell commands (ignoring layout). If anything differs, or the formatter fails, that instruction is left exactly as written and a warning is printed to stderr:
+
+```
+Dockerfile:12: left unformatted: output differs in meaning
+```
+
+Please [report](https://github.com/reteps/dockerfmt/issues) these warnings; they point at formatter bugs.
+
+Some content is deliberately left as written:
+
+- `RUN`/`CMD`/`ENTRYPOINT` bodies after a `SHELL` instruction that selects a non-POSIX shell (PowerShell, `cmd`), until the next `FROM`
+- heredocs fed to another program (`RUN python3 <<EOF`, `RUN <<EOF python3`, or a body with a non-shell shebang), and all `COPY`/`ADD` heredocs
+- shell bodies that the shell printer would split into several statements, such as `a; b`, `{ ...; }` groups, or multi-line `if`/`for`
+- instructions dockerfmt doesn't know
+
 ## Ignoring Directives
 
 To skip formatting for a specific directive, place a `# dockerfmt-ignore` comment on the line immediately before it:
@@ -169,7 +186,7 @@ RUN   echo   "this stays exactly as-is"
 RUN echo "this gets formatted normally"
 ```
 
-The ignore comment applies only to the next directive. This is useful as an escape hatch for cases where the formatter produces unwanted output, such as command grouping or unescaped semicolons:
+The ignore comment applies only to the next directive. This is useful as an escape hatch for output you don't like:
 
 ```dockerfile
 # dockerfmt-ignore
@@ -197,8 +214,8 @@ repos:
 
 ## Limitations
 
-- The `RUN` formatter does not support command grouping (`{ \`) or unescaped semicolons — these are returned unformatted.
-- The `# escape=X` parser directive is not supported.
+- Shell bodies with several statements (`a; b`, `{ ...; }` groups) are left unformatted; see [Safety](#safety).
+- With a `# escape=` parser directive other than backslash, shell-form `RUN`/`CMD`/`ENTRYPOINT` bodies are left unformatted.
 - No line wrapping for long JSON-form commands.
 - Input must be UTF-8 (a UTF-8 byte order mark is kept). Other encodings, such as the UTF-16 that Windows PowerShell's `>` writes by default, are rejected with an error, as are files BuildKit can't parse; dockerfmt then exits non-zero and leaves the file unchanged.
 
