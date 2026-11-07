@@ -791,13 +791,41 @@ func spaceSeparated(mode multilineMode) func(*ExtendedNode, *Config) string {
 			if mode == argsOnOwnLines && hasLineContinuation(n) {
 				argSep = " \\\n" + strings.Repeat(" ", int(c.IndentSize))
 			}
-			content := strings.Join(getCmd(n.Next, isJSON), argSep)
+			var content string
+			if args := jsonArgs(n.Next); isJSON && !safeAsShellWords(args) {
+				// The JSON form is the only way to pass these arguments.
+				content = marshalJSONStringArray(args)
+			} else {
+				content = strings.Join(getCmd(n.Next, isJSON), argSep)
+			}
 			flagsMultiline := mode == flagsOnOwnLines && (hasLineContinuation(n) || hasMountFlag(n.Flags))
 			cmd = prependFlagsImpl(n.Flags, content, c, flagsMultiline) + "\n"
 		}
 
 		return n.directive() + " " + cmd
 	}
+}
+
+// jsonArgs returns the decoded arguments of a JSON-form directive.
+func jsonArgs(n *ExtendedNode) []string {
+	var args []string
+	for node := n; node != nil; node = node.Next {
+		args = append(args, node.Value)
+	}
+	return args
+}
+
+// safeAsShellWords reports whether JSON-form arguments can be written in the
+// space-separated form without changing them. BuildKit splits that form on
+// whitespace, so an argument containing whitespace, or an empty one, needs
+// the JSON form.
+func safeAsShellWords(args []string) bool {
+	for _, a := range args {
+		if a == "" || strings.ContainsAny(a, " \t\n\r\v\f") {
+			return false
+		}
+	}
+	return true
 }
 
 func formatMaintainer(n *ExtendedNode, c *Config) string {
