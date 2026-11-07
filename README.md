@@ -94,6 +94,17 @@ go install github.com/reteps/dockerfmt@latest
 docker run --rm -v $(pwd):/pwd ghcr.io/reteps/dockerfmt:latest /pwd/Dockerfile
 ```
 
+The default image is minimal: it contains only the `dockerfmt` binary and no shell. An Alpine-based variant, which also has a shell, is published as `ghcr.io/reteps/dockerfmt:alpine` (and `:<version>-alpine`). Use it for CI systems that run job scripts inside the image, such as GitLab CI:
+
+```yaml
+dockerfmt:
+  image:
+    name: ghcr.io/reteps/dockerfmt:alpine
+    entrypoint: [""]
+  script:
+    - dockerfmt --check Dockerfile
+```
+
 ## Usage
 
 ```bash
