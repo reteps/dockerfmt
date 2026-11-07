@@ -13,7 +13,29 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26.x'
-      - run: go test ./...
+      - run: go test -race ./...
+      - name: Fuzz
+        run: go test ./lib -run '^$' -fuzz FuzzFormat -fuzztime 60s
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.15.0
+      - name: Lint the wasm build
+        uses: golangci/golangci-lint-action@v9
+        env:
+          GOOS: js
+          GOARCH: wasm
+        with:
+          version: v2.15.0
+          args: ./js/
 
   js-test:
     name: JS Tests
