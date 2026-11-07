@@ -30,6 +30,12 @@ type instrContext struct {
 	posixShell bool
 }
 
+// formatsShell reports whether shell-form bodies can be formatted as POSIX
+// shell with backslash continuations.
+func (ctx instrContext) formatsShell() bool {
+	return ctx.posixShell && ctx.escape == '\\'
+}
+
 func defaultContext() instrContext {
 	return instrContext{escape: '\\', posixShell: true}
 }

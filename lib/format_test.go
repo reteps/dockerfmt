@@ -121,37 +121,6 @@ func TestMarshalJSONStringArray(t *testing.T) {
 	}
 }
 
-// --- unmarshalJSONStringArray ---
-
-func TestUnmarshalJSONStringArray(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected []string
-		ok       bool
-	}{
-		{"simple array", `["a", "b"]`, []string{"a", "b"}, true},
-		{"no spaces", `["a","b"]`, []string{"a", "b"}, true},
-		{"empty array", `[]`, []string{}, true},
-		{"single item", `["hello"]`, []string{"hello"}, true},
-		{"with escapes", `["say \"hi\""]`, []string{`say "hi"`}, true},
-		{"not json", `echo hello`, nil, false},
-		{"not array", `"hello"`, nil, false},
-		{"mixed types", `["a", 1]`, nil, false},
-		{"nested array", `[["a"]]`, nil, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, ok := unmarshalJSONStringArray(tt.input)
-			assert.Equal(t, tt.ok, ok)
-			if ok {
-				assert.Equal(t, tt.expected, result)
-			}
-		})
-	}
-}
-
 // --- formatBash ---
 
 func TestFormatBash(t *testing.T) {
@@ -240,6 +209,55 @@ func TestFormatShell(t *testing.T) {
 			"echo hi\necho bye\n",
 		},
 		{
+			"printer splitting statements bails out",
+			"if true; then \\\n  echo a; echo b; fi",
+			false,
+			defaultConfig,
+			"if true; then \\\n  echo a; echo b; fi",
+		},
+		{
+			"comment before operator keeps argument indentation",
+			"apt-get install -y \\\n  curl \\\n  # note\n  && rm -rf x",
+			false,
+			defaultConfig,
+			"apt-get install -y \\\n    curl \\\n    # note\n    && rm -rf x\n",
+		},
+		{
+			"comment before operand of trailing operator",
+			"a && \\\n  # note\n  b",
+			false,
+			defaultConfig,
+			"a \\\n    # note\n    && b\n",
+		},
+		{
+			"comment on first line gets a continuation",
+			"\\\n  # note\n  echo hi",
+			false,
+			defaultConfig,
+			"\\\n    # note\n    echo hi\n",
+		},
+		{
+			"blank line inside continuation is dropped",
+			"apk add \\\n    curl \\\n\n    git",
+			false,
+			defaultConfig,
+			"apk add \\\n    curl \\\n    git\n",
+		},
+		{
+			"comment between arguments",
+			"apk add \\\n    curl \\\n    # vcs\n    git",
+			false,
+			defaultConfig,
+			"apk add \\\n    curl \\\n    # vcs\n    git\n",
+		},
+		{
+			"unparseable shell is left as written",
+			"echo $((",
+			false,
+			defaultConfig,
+			"echo $((",
+		},
+		{
 			"space redirects passed through",
 			"echo foo >>bar",
 			false,
@@ -250,7 +268,12 @@ func TestFormatShell(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := formatShell(tt.content, tt.hereDoc, tt.config)
+			var result string
+			if tt.hereDoc {
+				result = formatHeredocScript(tt.content, tt.config)
+			} else {
+				result = formatShellBody(tt.content, tt.config)
+			}
 			assert.Equal(t, tt.expected, result)
 		})
 	}
