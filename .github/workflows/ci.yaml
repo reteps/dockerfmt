@@ -38,8 +38,11 @@ jobs:
           args: ./js/
 
   js-test:
-    name: JS Tests
+    name: JS Tests (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ['20.x', '22.x', '24.x']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -47,7 +50,7 @@ jobs:
           go-version: '1.26.x'
       - uses: actions/setup-node@v4
         with:
-          node-version: '20.x'
+          node-version: ${{ matrix.node }}
       - name: Install wasm-opt
         run: sudo apt-get install -y binaryen
       - name: Build and test
