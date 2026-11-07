@@ -337,6 +337,11 @@ func (df *ParseState) processNode(ast *ExtendedNode) {
 	} else if output, ok := df.formatChecked(ast); ok {
 		df.Output += output
 		df.CurrentLine = ast.EndLine
+	} else if ast.Value != "" { // the root node has no keyword
+		// No formatter for this instruction (e.g. a misspelled keyword,
+		// which BuildKit only rejects later): keep it exactly as written.
+		df.Output += ast.OriginalMultiline
+		df.CurrentLine = ast.EndLine
 	}
 	df.ctx.update(ast.Node)
 

@@ -117,3 +117,16 @@ func TestFallbackLeavesInstructionAsWritten(t *testing.T) {
 	require.Len(t, reasons, 1)
 	assert.Contains(t, reasons[0], "boom")
 }
+
+func TestUnknownInstructionKeptAsWritten(t *testing.T) {
+	for _, src := range []string{
+		"FROM a\nFORM b\nRUN echo  hi\n",
+		"FROM a\nRUN echo  hi\nFORM   b \\\n   c\n",
+	} {
+		out := FormatFileLines(strings.SplitAfter(src, "\n"), &Config{IndentSize: 4, TrailingNewline: true})
+		assert.Contains(t, out, "FORM", src)
+		assert.Contains(t, out, "RUN echo hi", src)
+	}
+	out := FormatFileLines(strings.SplitAfter("FROM a\nFORM   b \\\n   c\n", "\n"), &Config{IndentSize: 4, TrailingNewline: true})
+	assert.Equal(t, "FROM a\nFORM   b \\\n   c\n", out)
+}
