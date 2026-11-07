@@ -1,81 +1,53 @@
 package main
 
 import (
-	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/reteps/dockerfmt/lib"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-// expectedFallbacks lists fixtures with instructions the formatter can't yet
-// format without changing their meaning, so they are left as written.
-var expectedFallbacks = map[string]bool{}
+// TestFixtures formats each tests/in file and compares it with its tests/out
+// counterpart, as written and with CRLF line endings. Formatting must also be
+// idempotent, and no instruction may fall back to its original text: a
+// fallback would hide a formatter bug.
+func TestFixtures(t *testing.T) {
+	inputs, err := filepath.Glob("tests/in/*.dockerfile")
+	require.NoError(t, err)
+	require.NotEmpty(t, inputs)
 
-func TestFormatter(t *testing.T) {
-	// assert equality
-	assert.Equal(t, 123, 123, "they should be equal")
-	matchingFiles, err := filepath.Glob("tests/in/*.dockerfile")
-	if err != nil {
-		t.Fatalf("Failed to find test files: %v", err)
-	}
-	c := &lib.Config{
-		IndentSize:      4,
-		TrailingNewline: true,
-		SpaceRedirects:  false,
-	}
-	for _, fileName := range matchingFiles {
-		t.Run(fileName, func(t *testing.T) {
-			// Every fixture must format without the semantic guard falling
-			// back, or a formatter bug would hide behind the fallback.
-			c := *c
-			c.OnFallback = func(line int, reason string) {
-				if !expectedFallbacks[filepath.Base(fileName)] {
-					t.Errorf("%s:%d: left unformatted: %s", fileName, line, reason)
-				}
-			}
-			outFile := strings.Replace(fileName, "in", "out", 1)
-			originalLines, err := lib.GetFileLines(fileName)
-			if err != nil {
-				t.Fatalf("Failed to read file %s: %v", fileName, err)
-			}
-			fmt.Printf("Comparing file %s with %s\n", fileName, outFile)
-			formattedLines := lib.FormatFileLines(originalLines, &c)
+	for _, inFile := range inputs {
+		t.Run(filepath.Base(inFile), func(t *testing.T) {
+			t.Parallel()
+			in := readFile(t, inFile)
+			want := readFile(t, filepath.Join("tests", "out", filepath.Base(inFile)))
+			c := &lib.Config{IndentSize: 4, TrailingNewline: true, OnFallback: func(line int, reason string) {
+				t.Errorf("%s:%d: left unformatted: %s", inFile, line, reason)
+			}}
 
-			// Read outFile
-			outLines, err := lib.GetFileLines(outFile)
-			if err != nil {
-				t.Fatalf("Failed to read file %s: %v", outFile, err)
-			}
-			// Compare outLines with formattedLines
-			assert.Equal(t, strings.Join(outLines, ""), formattedLines, "Files should be equal")
+			got, err := lib.Format(in, c)
+			require.NoError(t, err)
+			assert.Equal(t, want, got)
+
+			again, err := lib.Format(got, c)
+			require.NoError(t, err)
+			assert.Equal(t, got, again, "formatting is not idempotent")
+
+			toCRLF := func(s string) string { return strings.ReplaceAll(s, "\n", "\r\n") }
+			gotCRLF, err := lib.Format(toCRLF(in), c)
+			require.NoError(t, err)
+			assert.Equal(t, toCRLF(want), gotCRLF, "CRLF input")
 		})
 	}
 }
 
-// TestFormatterCRLF runs every fixture with CRLF line endings: the output must
-// be the expected output with CRLF line endings (#73).
-func TestFormatterCRLF(t *testing.T) {
-	matchingFiles, err := filepath.Glob("tests/in/*.dockerfile")
-	if err != nil {
-		t.Fatalf("Failed to find test files: %v", err)
-	}
-	c := &lib.Config{IndentSize: 4, TrailingNewline: true}
-	toCRLF := func(lines []string) string { return strings.ReplaceAll(strings.Join(lines, ""), "\n", "\r\n") }
-	for _, fileName := range matchingFiles {
-		t.Run(fileName, func(t *testing.T) {
-			inLines, err := lib.GetFileLines(fileName)
-			if err != nil {
-				t.Fatal(err)
-			}
-			outLines, err := lib.GetFileLines(strings.Replace(fileName, "in", "out", 1))
-			if err != nil {
-				t.Fatal(err)
-			}
-			got := lib.FormatFileLines(strings.SplitAfter(toCRLF(inLines), "\n"), c)
-			assert.Equal(t, toCRLF(outLines), got)
-		})
-	}
+func readFile(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(name)
+	require.NoError(t, err)
+	return string(b)
 }

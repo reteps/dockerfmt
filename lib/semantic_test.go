@@ -69,7 +69,7 @@ func TestIsPOSIXShell(t *testing.T) {
 	}
 }
 
-func TestShellScriptShebang(t *testing.T) {
+func TestHasShellShebang(t *testing.T) {
 	for body, want := range map[string]bool{
 		"echo hi\n":                         true,
 		"#!/bin/sh\necho hi\n":              true,
@@ -78,7 +78,7 @@ func TestShellScriptShebang(t *testing.T) {
 		"#!/usr/bin/env python3\nprint()\n": false,
 		"#!/usr/bin/perl\nprint;\n":         false,
 	} {
-		assert.Equal(t, want, shellScriptShebang(body), body)
+		assert.Equal(t, want, hasShellShebang(body), body)
 	}
 }
 
@@ -104,15 +104,15 @@ func TestFallbackLeavesInstructionAsWritten(t *testing.T) {
 	// A meaning-changing format must never reach the output. Force one by
 	// formatting an instruction whose formatter misbehaves: here the
 	// fallback is exercised through a formatter panic.
-	orig := nodeFormatters["stopsignal"]
-	t.Cleanup(func() { nodeFormatters["stopsignal"] = orig })
-	nodeFormatters["stopsignal"] = func(*ExtendedNode, *Config) string { panic("boom") }
+	orig := formatters["stopsignal"]
+	t.Cleanup(func() { formatters["stopsignal"] = orig })
+	formatters["stopsignal"] = func(*node, *Config) string { panic("boom") }
 
 	var reasons []string
 	c := &Config{IndentSize: 4, TrailingNewline: true, OnFallback: func(line int, reason string) {
 		reasons = append(reasons, reason)
 	}}
-	out := FormatFileLines(strings.SplitAfter("FROM a\nSTOPSIGNAL   SIGTERM\nrun   echo  hi\n", "\n"), c)
+	out := mustFormat(t, "FROM a\nSTOPSIGNAL   SIGTERM\nrun   echo  hi\n", c)
 	assert.Equal(t, "FROM a\nSTOPSIGNAL   SIGTERM\nRUN echo hi\n", out)
 	require.Len(t, reasons, 1)
 	assert.Contains(t, reasons[0], "boom")
@@ -123,16 +123,16 @@ func TestUnknownInstructionKeptAsWritten(t *testing.T) {
 		"FROM a\nFORM b\nRUN echo  hi\n",
 		"FROM a\nRUN echo  hi\nFORM   b \\\n   c\n",
 	} {
-		out := FormatFileLines(strings.SplitAfter(src, "\n"), &Config{IndentSize: 4, TrailingNewline: true})
+		out := mustFormat(t, src, &Config{IndentSize: 4, TrailingNewline: true})
 		assert.Contains(t, out, "FORM", src)
 		assert.Contains(t, out, "RUN echo hi", src)
 	}
-	out := FormatFileLines(strings.SplitAfter("FROM a\nFORM   b \\\n   c\n", "\n"), &Config{IndentSize: 4, TrailingNewline: true})
+	out := mustFormat(t, "FROM a\nFORM   b \\\n   c\n", &Config{IndentSize: 4, TrailingNewline: true})
 	assert.Equal(t, "FROM a\nFORM   b \\\n   c\n", out)
 }
 
 func TestCmdJSONKeepsFlags(t *testing.T) {
-	out := FormatFileLines(strings.SplitAfter("FROM a\nCMD --doit [ \"a\", \"b\" ]\n", "\n"), &Config{IndentSize: 4, TrailingNewline: true})
+	out := mustFormat(t, "FROM a\nCMD --doit [ \"a\", \"b\" ]\n", &Config{IndentSize: 4, TrailingNewline: true})
 	assert.Equal(t, "FROM a\nCMD --doit [\"a\", \"b\"]\n", out)
 }
 
@@ -140,6 +140,13 @@ func TestCopyKeepsEndOfFlags(t *testing.T) {
 	c := &Config{IndentSize: 4, TrailingNewline: true, OnFallback: func(line int, reason string) {
 		t.Errorf("line %d: unexpected fallback: %s", line, reason)
 	}}
-	out := FormatFileLines(strings.SplitAfter("FROM a\nCOPY --chown=1  --  --weird /tmp/\nCOPY [\"a\\\"b\", \"c\"]\n", "\n"), c)
+	out := mustFormat(t, "FROM a\nCOPY --chown=1  --  --weird /tmp/\nCOPY [\"a\\\"b\", \"c\"]\n", c)
 	assert.Equal(t, "FROM a\nCOPY --chown=1 -- --weird /tmp/\nCOPY a\"b c\n", out)
+}
+
+func mustFormat(t *testing.T, input string, c *Config) string {
+	t.Helper()
+	out, err := Format(input, c)
+	require.NoError(t, err)
+	return out
 }

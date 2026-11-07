@@ -3,7 +3,6 @@ package lib
 import (
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"unicode/utf8"
 
@@ -12,44 +11,13 @@ import (
 
 const utf8BOM = "\xEF\xBB\xBF"
 
-// Format formats the contents of a Dockerfile. It returns an error, and no
-// output, if the input isn't UTF-8 text (for example a UTF-16 file, which is
-// what Windows PowerShell's ">" writes by default) or BuildKit can't parse it.
+// formatContent formats a whole Dockerfile. The formatter works on "\n"
+// line endings and a file without a byte order mark; both are restored
+// afterwards. The output uses "\r\n" if most of the input's lines do, so a
+// file that mixes line endings gets the dominant one throughout.
 //
-// The output keeps the input's line endings (see formatContent) and its UTF-8
-// byte order mark, if it has one.
-func Format(content string, c *Config) (string, error) {
-	if err := checkEncoding(content); err != nil {
-		return "", err
-	}
-	return formatContent(content, c)
-}
-
-// FormatFileLines formats a Dockerfile given as lines that each keep their
-// line ending (as returned by strings.SplitAfter(content, "\n")). Unlike
-// Format, it doesn't check the encoding, and it exits the process if the file
-// can't be parsed. New code should use Format.
-func FormatFileLines(fileLines []string, c *Config) string {
-	content := strings.Join(fileLines, "")
-	out, err := formatContent(content, c)
-	if err != nil {
-		log.Printf("%s\n", content)
-		log.Fatalf("Error parsing file: %v", err)
-	}
-	return out
-}
-
-// formatContent formats a whole Dockerfile. The output uses the input's line
-// ending: "\r\n" if most of its lines end in "\r\n", "\n" otherwise.
-//
-// BuildKit keeps the "\r" of a "\r\n" inside heredoc bodies and quoted
-// strings, so the formatter works on "\n" only and the line ending is restored
-// afterwards; a file that consistently uses "\r\n" therefore reads the same to
-// BuildKit before and after formatting. A file that mixes line endings is
-// converted to the dominant one throughout.
-//
-// BuildKit ignores a UTF-8 byte order mark, so it is set aside while
-// formatting and put back at the start of the output.
+// BuildKit keeps the "\r" of a "\r\n" in heredoc bodies and quoted values,
+// so a file that consistently uses "\r\n" reads the same before and after.
 func formatContent(content string, c *Config) (string, error) {
 	bom := strings.HasPrefix(content, utf8BOM)
 	content = strings.TrimPrefix(content, utf8BOM)

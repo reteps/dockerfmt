@@ -395,10 +395,10 @@ func startsWithOperator(line string) bool {
 	return false
 }
 
-// formatHeredocScript formats the body of a heredoc that the shell runs as a
+// formatScript formats the body of a heredoc that the shell runs as a
 // script. Comments are real shell comments here. The body is returned
 // unchanged if it doesn't parse.
-func formatHeredocScript(body string, c *Config) string {
+func formatScript(body string, c *Config) string {
 	f, err := parseShell(body)
 	if err != nil {
 		return body

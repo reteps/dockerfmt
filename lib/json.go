@@ -1,8 +1,3 @@
-// JSON-form directives (CMD ["ls", "-la"]) are decoded by BuildKit's parser;
-// we only need to write []string arrays back out, so we implement just that.
-//
-// This also preserves the non-HTML-escaping behavior: Go's json.Marshal
-// escapes <, >, & as \uXXXX for HTML safety, which we don't want.
 package lib
 
 import (
@@ -10,9 +5,9 @@ import (
 	"strings"
 )
 
-// marshalJSONStringArray formats a string slice as a JSON array with spaces
-// after commas: ["a", "b"]. Unlike encoding/json, it does not escape HTML
-// characters (<, >, &).
+// marshalJSONStringArray writes items as a JSON array in the style of a
+// Dockerfile exec form: ["a", "b"]. Unlike encoding/json, it doesn't escape
+// <, > and & for HTML.
 func marshalJSONStringArray(items []string) string {
 	var b strings.Builder
 	b.WriteByte('[')
@@ -26,7 +21,7 @@ func marshalJSONStringArray(items []string) string {
 	return b.String()
 }
 
-// writeJSONString writes a JSON-escaped string (including surrounding quotes) to b.
+// writeJSONString writes s to b as a JSON string literal.
 func writeJSONString(b *strings.Builder, s string) {
 	b.WriteByte('"')
 	for _, r := range s {
