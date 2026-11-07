@@ -16,5 +16,8 @@
   ],
   "files": [
     "bin"
-  ]
+  ],
+  "scripts": {
+    "prepack": "cp ../../../LICENSE LICENSE"
+  }
 }

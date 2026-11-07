@@ -1,0 +1,2 @@
+# The Alpine variant overrides this with KO_DEFAULTBASEIMAGE (see release.yaml).
+defaultBaseImage: gcr.io/distroless/static-debian12

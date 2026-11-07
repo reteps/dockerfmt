@@ -1,3 +1,5 @@
+import './crypto-polyfill.js'
+
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -18,7 +20,7 @@ const getWasm = () => {
 
 export const formatDockerfileContents = async (
     fileContents: string,
-    options: FormatOptions,
+    options?: FormatOptions,
 ) => {
     return formatDockerfileContents_(fileContents, options, getWasm)
 }
@@ -26,7 +28,7 @@ export const formatDockerfileContents = async (
 // Unlike buffer.toString(), this rejects invalid UTF-8 instead of replacing it
 // with U+FFFD (which would corrupt the file if the result is written back),
 // and keeps a byte order mark so the output keeps it too.
-const decodeUtf8 = (fileName: string, buffer: Buffer) => {
+const decodeUtf8 = (fileName: string, buffer: Uint8Array) => {
     try {
         return new TextDecoder('utf-8', {
             fatal: true,
@@ -44,7 +46,7 @@ const decodeUtf8 = (fileName: string, buffer: Buffer) => {
 
 export const formatDockerfile = async (
     fileName: string,
-    options: FormatOptions,
+    options?: FormatOptions,
 ) => {
     const fileBuffer = await fs.readFile(fileName)
     const fileContents = decodeUtf8(fileName, fileBuffer)

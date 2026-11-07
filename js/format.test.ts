@@ -4,6 +4,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { formatDockerfile, formatDockerfileContents } from './node.js'
+import { formatDockerfileContents as browserFormat } from './format.js'
 
 const defaultOptions = {
     indent: 4,
@@ -105,6 +106,105 @@ RUN echo a \\
             defaultOptions,
         )
         assert.equal(result, 'FROM alpine\n')
+    })
+
+    it('applies defaults for omitted options', async () => {
+        const input = 'from alpine\nrun echo a \\\n  && echo b'
+        const expected = 'FROM alpine\nRUN echo a \\\n    && echo b'
+        assert.equal(await formatDockerfileContents(input), expected)
+        assert.equal(await formatDockerfileContents(input, {}), expected)
+    })
+
+    it('rejects invalid options', async () => {
+        const cases: [unknown, ErrorConstructor, RegExp][] = [
+            [null, TypeError, /options must be an object/],
+            ['4', TypeError, /options must be an object/],
+            [{ indent: '2' }, TypeError, /indent must be an integer/],
+            [{ indent: 2.5 }, TypeError, /indent must be an integer/],
+            [{ indent: NaN }, TypeError, /indent must be an integer/],
+            [{ indent: 0 }, RangeError, /indent must be from 1 to 16/],
+            [{ indent: -1 }, RangeError, /indent must be from 1 to 16/],
+            [{ indent: 17 }, RangeError, /indent must be from 1 to 16/],
+            [{ trailingNewline: 1 }, TypeError, /trailingNewline must be a/],
+            [{ spaceRedirects: 'no' }, TypeError, /spaceRedirects must be a/],
+            [{ onFallback: true }, TypeError, /onFallback must be a function/],
+        ]
+        for (const [options, name, message] of cases) {
+            await assert.rejects(
+                formatDockerfileContents('FROM alpine', options as any),
+                (err: Error) =>
+                    err.constructor === name && message.test(err.message),
+                `options ${JSON.stringify(options)}`,
+            )
+        }
+        await assert.rejects(formatDockerfileContents(42 as any), TypeError)
+        assert.equal(
+            await formatDockerfileContents('from alpine', defaultOptions),
+            'FROM alpine\n',
+        )
+    })
+
+    it('formats concurrent calls', async () => {
+        const inputs = Array.from({ length: 20 }, (_, i) => `from alpine:${i}`)
+        const results = await Promise.all(
+            inputs.map((input, i) =>
+                formatDockerfileContents(input, {
+                    ...defaultOptions,
+                    indent: (i % 16) + 1,
+                }),
+            ),
+        )
+        assert.deepEqual(
+            results,
+            inputs.map((_, i) => `FROM alpine:${i}\n`),
+        )
+    })
+
+    // A fallback needs a formatter bug. A MAINTAINER with no value crashes
+    // the formatter; if that is fixed, use another input that falls back.
+    const fallbackInput = 'FROM alpine\n\nMAINTAINER\n'
+
+    it('instantiates the WASM module once', async () => {
+        let loads = 0
+        const getWasm = () => {
+            loads++
+            return fs.readFile(new URL('format.wasm', import.meta.url))
+        }
+        await Promise.all([
+            browserFormat('from a', defaultOptions, getWasm),
+            browserFormat('from b', defaultOptions, getWasm),
+            formatDockerfileContents('from c', defaultOptions),
+        ])
+        await browserFormat('from d', defaultOptions, getWasm)
+        assert.ok(loads <= 1, `loaded ${loads} times`)
+    })
+
+    it('reports fallbacks to onFallback', async () => {
+        const fallbacks: [number, string][] = []
+        const result = await formatDockerfileContents(fallbackInput, {
+            ...defaultOptions,
+            onFallback: (line, reason) => fallbacks.push([line, reason]),
+        })
+        assert.equal(result, fallbackInput)
+        assert.equal(fallbacks.length, 1)
+        assert.equal(fallbacks[0][0], 3)
+        assert.match(fallbacks[0][1], /^formatter error: /)
+    })
+
+    it('rejects with the error thrown by onFallback', async () => {
+        const thrown = new Error('stop')
+        await assert.rejects(
+            formatDockerfileContents(fallbackInput, {
+                onFallback: () => {
+                    throw thrown
+                },
+            }),
+            (err) => err === thrown,
+        )
+        assert.equal(
+            await formatDockerfileContents('from alpine', defaultOptions),
+            'FROM alpine\n',
+        )
     })
 
     it('rejects UTF-16 decoded as UTF-8', async () => {

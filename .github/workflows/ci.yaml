@@ -54,5 +54,5 @@ jobs:
         run: |
           cd js
           npm ci
-          npm run build
-          node --test dist/format.test.js
+          npm run build-go
+          npm test
