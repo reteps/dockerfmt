@@ -41,12 +41,18 @@ type ParseState struct {
 	// Needed to pull in comments
 	AllOriginalLines []string
 	Config           *Config
+	// ctx tracks file-level state (escape character, current SHELL).
+	ctx instrContext
 }
 
 type Config struct {
 	IndentSize      uint
 	TrailingNewline bool
 	SpaceRedirects  bool
+	// OnFallback, if set, is called when an instruction is left unformatted
+	// because formatting it would have changed its meaning (or the formatter
+	// failed). line is the instruction's 1-based start line.
+	OnFallback func(line int, reason string)
 }
 
 // hasIgnoreComment reports whether any line in the block is a "# dockerfmt-ignore" comment.
@@ -328,10 +334,11 @@ func (df *ParseState) processNode(ast *ExtendedNode) {
 		// # dockerfmt-ignore: emit the directive verbatim.
 		df.Output += ast.OriginalMultiline
 		df.CurrentLine = ast.EndLine
-	} else if output, ok := FormatNode(ast, df.Config); ok {
+	} else if output, ok := df.formatChecked(ast); ok {
 		df.Output += output
 		df.CurrentLine = ast.EndLine
 	}
+	df.ctx.update(ast.Node)
 
 	for _, child := range ast.Children {
 		df.processNode(child)
@@ -340,6 +347,39 @@ func (df *ParseState) processNode(ast *ExtendedNode) {
 	if ast.Node.Next != nil { // Must use .Node.Next (parser.Node), not .Next (ExtendedNode)
 		df.processNode(ast.Next)
 	}
+}
+
+// formatChecked formats one instruction and verifies that BuildKit reads the
+// result the same way as the original. If it doesn't, or the formatter fails,
+// the original text is returned unchanged.
+func (df *ParseState) formatChecked(ast *ExtendedNode) (string, bool) {
+	output, ok, reason := formatRecovering(ast, df.Config)
+	if !ok {
+		return "", false
+	}
+	if reason == "" && output != ast.OriginalMultiline {
+		if same, why := equivalent(ast.Node, output, df.ctx); !same {
+			reason = why
+		}
+	}
+	if reason != "" {
+		if df.Config.OnFallback != nil {
+			df.Config.OnFallback(ast.StartLine, reason)
+		}
+		return ast.OriginalMultiline, true
+	}
+	return output, true
+}
+
+// formatRecovering runs FormatNode, turning a panic into a fallback reason.
+func formatRecovering(ast *ExtendedNode, c *Config) (output string, ok bool, reason string) {
+	defer func() {
+		if r := recover(); r != nil {
+			output, ok, reason = "", true, fmt.Sprintf("formatter error: %v", r)
+		}
+	}()
+	output, ok = FormatNode(ast, c)
+	return output, ok, ""
 }
 
 func FormatOnBuild(n *ExtendedNode, c *Config) string {
@@ -369,6 +409,10 @@ func FormatFileLines(fileLines []string, c *Config) string {
 	parseState := &ParseState{
 		AllOriginalLines: fileLines,
 		Config:           c,
+		ctx:              defaultContext(),
+	}
+	if result.EscapeToken != 0 {
+		parseState.ctx.escape = result.EscapeToken
 	}
 	rootNode := BuildExtendedNode(result.AST, fileLines)
 	parseState.processNode(rootNode)
@@ -730,7 +774,7 @@ func getCmd(n *ExtendedNode, shouldSplitNode bool) []string {
 		if shouldSplitNode {
 			parts, err := shlex.Split(rawValue)
 			if err != nil {
-				log.Fatalf("Error splitting: %s\n", node.Value)
+				panic(fmt.Errorf("splitting %q: %w", node.Value, err))
 			}
 			cmd = append(cmd, parts...)
 		} else {
@@ -829,18 +873,22 @@ func safeAsShellWords(args []string) bool {
 }
 
 func formatMaintainer(n *ExtendedNode, c *Config) string {
-	maintainer := n.Next.Value
-	// A value wrapped in one pair of quotes ("Jane Doe") already reads as
-	// quoted, so drop that pair as before.
-	if len(maintainer) >= 2 && maintainer[0] == '"' && maintainer[len(maintainer)-1] == '"' &&
-		!strings.Contains(maintainer[1:len(maintainer)-1], `"`) {
-		maintainer = maintainer[1 : len(maintainer)-1]
-	}
+	maintainer := unwrapMaintainerQuotes(n.Next.Value)
 	// MAINTAINER takes the raw rest of the line, so escape what would
 	// break the double-quoted LABEL value. LABEL also expands variables while
 	// MAINTAINER does not, so "$" must be escaped too.
 	maintainer = strings.NewReplacer(`\`, `\\`, `"`, `\"`, `$`, `\$`).Replace(maintainer)
 	return "LABEL org.opencontainers.image.authors=\"" + maintainer + "\"\n"
+}
+
+// unwrapMaintainerQuotes drops one pair of double quotes wrapping a
+// MAINTAINER value ("Jane Doe"), which already reads as quoted.
+func unwrapMaintainerQuotes(maintainer string) string {
+	if len(maintainer) >= 2 && maintainer[0] == '"' && maintainer[len(maintainer)-1] == '"' &&
+		!strings.Contains(maintainer[1:len(maintainer)-1], `"`) {
+		return maintainer[1 : len(maintainer)-1]
+	}
+	return maintainer
 }
 
 func GetFileLines(fileName string) ([]string, error) {
@@ -900,8 +948,7 @@ func formatBash(s string, c *Config) string {
 	r := strings.NewReader(s)
 	f, err := syntax.NewParser(syntax.KeepComments(true)).Parse(r, "")
 	if err != nil {
-		fmt.Printf("Error parsing: %s\n", s)
-		panic(err)
+		panic(fmt.Errorf("parsing shell: %w", err))
 	}
 	buf := new(bytes.Buffer)
 	syntax.NewPrinter(

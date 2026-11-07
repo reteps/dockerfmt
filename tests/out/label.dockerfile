@@ -28,14 +28,14 @@ VOLUME /QLC
 WORKDIR /QLC
 
 ENV QLC_DEPENDS="\
-    libasound2 \
-    libfftw3-double3 \
-    libftdi1 \
-    libqt4-network \
-    libqt4-script \
-    libqtcore4 \
-    libqtgui4 \
-    libusb-0.1-4"
+                libasound2 \
+                libfftw3-double3 \
+                libftdi1 \
+                libqt4-network \
+                libqt4-script \
+                libqtcore4 \
+                libqtgui4 \
+                libusb-0.1-4"
 
 # XVFB is used to fake an X server for testing and headless mode.
 RUN apt-get update \

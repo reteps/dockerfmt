@@ -120,6 +120,11 @@ func applyEditorConfig(base *lib.Config, filePath string, cmd *cobra.Command) *l
 }
 
 func processInput(inputName string, inputBytes []byte, config *lib.Config) (formatted bool) {
+	c := *config
+	c.OnFallback = func(line int, reason string) {
+		fmt.Fprintf(os.Stderr, "%s:%d: left unformatted: %s\n", inputName, line, reason)
+	}
+	config = &c
 	originalContent := string(inputBytes)
 	lines := strings.SplitAfter(strings.TrimSuffix(originalContent, "\n"), "\n")
 
