@@ -1,6 +1,6 @@
 # `@reteps/dockerfmt`
 
-Bindings around the Golang `dockerfmt` tooling. It compiles the Go code to WebAssembly (using standard Go's `GOOS=js GOARCH=wasm` target), which is then used in the JS bindings.
+Bindings around the Golang `dockerfmt` tooling. It compiles the Go code to WebAssembly (using standard Go's `GOOS=js GOARCH=wasm` target), which is then used in the JS bindings. Requires Node.js 16 or later.
 
 ```js
 import { formatDockerfile } from '@reteps/dockerfmt'
