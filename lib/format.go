@@ -3,7 +3,6 @@ package lib
 import (
 	"bytes"
 	"fmt"
-	"log"
 	"os"
 	"regexp"
 	"strings"
@@ -406,11 +405,12 @@ func FormatOnBuild(n *ExtendedNode, c *Config) string {
 	return n.OriginalMultiline
 }
 
-func FormatFileLines(fileLines []string, c *Config) string {
+// formatLines formats a Dockerfile given as "\n"-terminated lines. Line
+// endings must already be normalized; see formatContent.
+func formatLines(fileLines []string, c *Config) (string, error) {
 	result, err := parser.Parse(strings.NewReader(strings.Join(fileLines, "")))
 	if err != nil {
-		log.Printf("%s\n", strings.Join(fileLines, ""))
-		log.Fatalf("Error parsing file: %v", err)
+		return "", parseError(err)
 	}
 
 	parseState := &ParseState{
@@ -433,7 +433,7 @@ func FormatFileLines(fileLines []string, c *Config) string {
 	if c.TrailingNewline {
 		parseState.Output += "\n"
 	}
-	return parseState.Output
+	return parseState.Output, nil
 }
 
 // BuildExtendedNode wraps a parser.Node tree, attaching the original multiline

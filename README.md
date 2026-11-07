@@ -71,6 +71,7 @@ RUN apt-get update \
 - Converts legacy `ENV` syntax (`ENV key value` → `ENV key=value`)
 - Upgrades deprecated directives (`MAINTAINER` → `LABEL`)
 - Supports heredocs in `RUN` steps
+- Keeps the file's line endings: CRLF files stay CRLF (a file with mixed line endings gets its most common one)
 - Reads from files or stdin
 - Pre-commit hook support
 - JS/WASM bindings for Node.js ([docs](js/README.md))
@@ -199,5 +200,6 @@ repos:
 - The `RUN` formatter does not support command grouping (`{ \`) or unescaped semicolons — these are returned unformatted.
 - The `# escape=X` parser directive is not supported.
 - No line wrapping for long JSON-form commands.
+- Input must be UTF-8 (a UTF-8 byte order mark is kept). Other encodings, such as the UTF-16 that Windows PowerShell's `>` writes by default, are rejected with an error, as are files BuildKit can't parse; dockerfmt then exits non-zero and leaves the file unchanged.
 
 Contributions welcome — please file issues for bugs or feature requests.

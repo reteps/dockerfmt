@@ -54,3 +54,28 @@ func TestFormatter(t *testing.T) {
 		})
 	}
 }
+
+// TestFormatterCRLF runs every fixture with CRLF line endings: the output must
+// be the expected output with CRLF line endings (#73).
+func TestFormatterCRLF(t *testing.T) {
+	matchingFiles, err := filepath.Glob("tests/in/*.dockerfile")
+	if err != nil {
+		t.Fatalf("Failed to find test files: %v", err)
+	}
+	c := &lib.Config{IndentSize: 4, TrailingNewline: true}
+	toCRLF := func(lines []string) string { return strings.ReplaceAll(strings.Join(lines, ""), "\n", "\r\n") }
+	for _, fileName := range matchingFiles {
+		t.Run(fileName, func(t *testing.T) {
+			inLines, err := lib.GetFileLines(fileName)
+			if err != nil {
+				t.Fatal(err)
+			}
+			outLines, err := lib.GetFileLines(strings.Replace(fileName, "in", "out", 1))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := lib.FormatFileLines(strings.SplitAfter(toCRLF(inLines), "\n"), c)
+			assert.Equal(t, toCRLF(outLines), got)
+		})
+	}
+}
