@@ -92,10 +92,16 @@ go install github.com/reteps/dockerfmt@latest
 ### Docker
 
 ```bash
-docker run --rm -v $(pwd):/pwd ghcr.io/reteps/dockerfmt:latest /pwd/Dockerfile
+# print the formatted file
+docker run --rm -v "$PWD:/pwd" ghcr.io/reteps/dockerfmt:latest /pwd/Dockerfile
+
+# format in place, as your user so the rewritten file stays yours
+docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/pwd" ghcr.io/reteps/dockerfmt:latest --write /pwd/Dockerfile
 ```
 
-The default image is minimal: it contains only the `dockerfmt` binary and no shell. An Alpine-based variant, which also has a shell, is published as `ghcr.io/reteps/dockerfmt:alpine` (and `:<version>-alpine`). Use it for CI systems that run job scripts inside the image, such as GitLab CI:
+The image runs as root by default. With `-w`/`--write`, pass `-u "$(id -u):$(id -g)"` so dockerfmt runs as your own user: anything it writes is then owned by you rather than root, and it can only change files you could change yourself.
+
+The default image is minimal: it is based on [`gcr.io/distroless/static-debian12`](https://github.com/GoogleContainerTools/distroless) and contains only the `dockerfmt` binary, CA certificates and timezone data, with no shell. An Alpine-based variant, which also has a shell, is published as `ghcr.io/reteps/dockerfmt:alpine` (and `:<version>-alpine`). Use it for CI systems that run job scripts inside the image, such as GitLab CI:
 
 ```yaml
 dockerfmt:
