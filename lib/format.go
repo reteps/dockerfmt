@@ -17,7 +17,6 @@ import (
 
 var (
 	reWhitespace          = regexp.MustCompile(`[ \t]`)
-	reLeadingSpaces       = regexp.MustCompile(`(?m)^ *`)
 	reUnescapedSemicolon  = regexp.MustCompile(`[^\\];`)
 	reCommentContinuation = regexp.MustCompile(`(\\(?:\s*` + "`#.*#`" + `\\){1,}\s*)&&(.[^\\])`)
 	reBacktickComment     = regexp.MustCompile(`([ \t]*)(?:&& )?` + "`(#.*)#` " + `\\`)
@@ -477,10 +476,8 @@ func formatEnv(n *ExtendedNode, c *Config) string {
 	if !ok {
 		return n.OriginalMultiline
 	}
-	content := StripWhitespace(rawContent, true)
-	// Indent all lines with indentSize spaces
-	content = strings.Trim(reLeadingSpaces.ReplaceAllString(content, strings.Repeat(" ", int(c.IndentSize))), " ")
-	return n.directive() + " " + content
+	escape := continuationEscape(n.OriginalMultiline)
+	return n.directive() + " " + reindentContinuations(rawContent, c.IndentSize, escape, true)
 }
 
 // formatLegacyEnv converts the legacy `ENV key value` form to `key=value`.
@@ -752,15 +749,15 @@ func GetHeredoc(n *ExtendedNode) (string, bool) {
 	return content, true
 }
 func formatBasic(n *ExtendedNode, c *Config) string {
-	value, success := GetHeredoc(n)
-	if !success {
-		rawContent, ok := extractDirectiveContent(n, 0)
-		if !ok {
-			return n.directive() + "\n"
-		}
-		value = strings.TrimLeft(rawContent, " \t")
+	if value, ok := GetHeredoc(n); ok {
+		return IndentFollowingLines(n.directive()+" "+value, c.IndentSize)
 	}
-	return IndentFollowingLines(n.directive()+" "+value, c.IndentSize)
+	rawContent, ok := extractDirectiveContent(n, 0)
+	if !ok {
+		return n.directive() + "\n"
+	}
+	escape := continuationEscape(n.OriginalMultiline)
+	return n.directive() + " " + reindentContinuations(rawContent, c.IndentSize, escape, false)
 }
 
 func getCmd(n *ExtendedNode, shouldSplitNode bool) []string {
