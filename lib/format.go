@@ -24,6 +24,10 @@ var (
 	reMultipleNewlines    = regexp.MustCompile(`\n{3,}`)
 )
 
+// emptyContinuationMarker stands in for an empty continuation line ("\" alone
+// on a line) while shell content goes through shfmt; see preprocessShellComments.
+const emptyContinuationMarker = "# dockerfmt:empty-continuation"
+
 type ExtendedNode struct {
 	*parser.Node
 	Children          []*ExtendedNode
@@ -80,10 +84,140 @@ func prependFlagsImpl(flags []string, content string, c *Config, multiline bool)
 			b.WriteString(" \\\n")
 			b.WriteString(indent)
 		}
-		b.WriteString(content)
+		b.WriteString(trimLeadingContinuation(content))
 		return b.String()
 	}
 	return strings.Join(flags, " ") + " " + content
+}
+
+// trimLeadingContinuation drops a leading "\" line continuation (and the
+// indentation after it) from content. Formatted shell content starts with one
+// when its first line is a comment, so it doesn't merge into the directive
+// line; after a flag that already ends in " \", it would be redundant.
+func trimLeadingContinuation(content string) string {
+	if rest, ok := strings.CutPrefix(content, "\\\n"); ok {
+		return strings.TrimLeft(rest, " \t")
+	}
+	return content
+}
+
+// flagsRegionItem is one line-level element between a directive keyword and
+// its content: a flag, a comment line, or an empty continuation line ("\").
+type flagsRegionItem struct {
+	text string
+	kind flagsRegionKind
+}
+
+type flagsRegionKind int
+
+const (
+	regionFlag flagsRegionKind = iota
+	regionComment
+	regionEmptyContinuation
+)
+
+// scanFlagsRegion walks the original source of n from the directive keyword
+// through its flags (n.Flags, in order) and returns the flags interleaved with
+// any comment lines and empty continuation lines ("\" alone on a line) found
+// among them, plus empty continuation lines directly after the last flag. The
+// buildkit parser drops these, so this recovers them from the source.
+//
+// ok is false if the flags can't be located in the source, in which case the
+// caller should fall back to n.Flags.
+func scanFlagsRegion(n *ExtendedNode) (items []flagsRegionItem, ok bool) {
+	if len(n.Flags) == 0 {
+		// Without flags, everything after the keyword is content.
+		return nil, false
+	}
+	rest := n.OriginalMultiline
+	if rest == "" {
+		rest = n.Original
+	}
+	rest = strings.TrimLeft(rest, " \t")
+	// Skip the directive keyword.
+	if i := strings.IndexAny(rest, " \t\\\n"); i >= 0 {
+		rest = rest[i:]
+	} else {
+		return nil, false
+	}
+
+	flags := n.Flags
+	atLineStart := false // whether rest begins a new physical line
+	for {
+		rest = strings.TrimLeft(rest, " \t")
+		switch {
+		case strings.HasPrefix(rest, "\\\n"):
+			if atLineStart {
+				items = append(items, flagsRegionItem{"\\", regionEmptyContinuation})
+			}
+			rest = rest[2:]
+			atLineStart = true
+			continue
+		case atLineStart && strings.HasPrefix(rest, "\n"):
+			// Blank line inside a continuation; drop it.
+			rest = rest[1:]
+			continue
+		case len(flags) > 0 && atLineStart && strings.HasPrefix(rest, "#"):
+			// Comment line among the flags. Comments after the last flag are
+			// part of the content and handled by the shell formatter.
+			line, after, _ := strings.Cut(rest, "\n")
+			items = append(items, flagsRegionItem{strings.TrimRight(line, " \t"), regionComment})
+			rest = after
+			continue
+		case len(flags) > 0 && strings.HasPrefix(rest, flags[0]):
+			items = append(items, flagsRegionItem{flags[0], regionFlag})
+			rest = rest[len(flags[0]):]
+			flags = flags[1:]
+			atLineStart = false
+			continue
+		}
+		break
+	}
+	if len(flags) > 0 {
+		return nil, false
+	}
+	return items, true
+}
+
+// prependFlagsRegion is like prependFlags, but also re-emits the comment lines
+// and empty continuation lines found among the flags. Each item goes on its own
+// line. It returns ok=false when there is nothing beyond the flags themselves,
+// so callers keep their usual flag layout.
+func prependFlagsRegion(n *ExtendedNode, content string, c *Config) (string, bool) {
+	items, ok := scanFlagsRegion(n)
+	if !ok {
+		return "", false
+	}
+	extra := false
+	for _, item := range items {
+		if item.kind != regionFlag {
+			extra = true
+			break
+		}
+	}
+	if !extra {
+		return "", false
+	}
+
+	indent := strings.Repeat(" ", int(c.IndentSize))
+	var b strings.Builder
+	if items[0].kind != regionFlag {
+		// A comment or "\" can't share the directive line.
+		b.WriteString("\\\n")
+		b.WriteString(indent)
+	}
+	for _, item := range items {
+		b.WriteString(item.text)
+		switch item.kind {
+		case regionFlag:
+			b.WriteString(" \\\n")
+		default:
+			b.WriteString("\n")
+		}
+		b.WriteString(indent)
+	}
+	b.WriteString(trimLeadingContinuation(content))
+	return b.String(), true
 }
 
 // hasLineContinuation reports whether the node's original source spanned multiple
@@ -348,12 +482,19 @@ func preprocessShellComments(content string) string {
 
 	// Step 1: wrap comment lines as backtick placeholders.
 	// Format: `# comment text#`\  — shfmt treats this as a command substitution.
+	// Empty continuation lines ("\" alone) are turned into a marker comment
+	// first, so they survive in every position (shfmt drops them before "&&"
+	// lines and at the start of the content).
+	original := slices.Clone(lines)
 	for i, line := range lines {
 		trimmed := strings.TrimLeft(line, " \t")
+		if isEmptyContinuation(original, i) {
+			trimmed = emptyContinuationMarker + "\n"
+		}
 		if len(trimmed) == 0 || trimmed[0] != '#' {
 			continue
 		}
-		ws := line[:len(line)-len(trimmed)]
+		ws := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
 		comment := strings.TrimRight(trimmed, " \t\n")
 		// Escape backticks so they nest safely inside the backtick placeholder.
 		// Inside backtick command substitutions, \` represents a literal backtick.
@@ -389,6 +530,40 @@ func preprocessShellComments(content string) string {
 	}
 
 	return strings.Join(lines, "")
+}
+
+// isEmptyContinuation reports whether lines[i] is an empty continuation line
+// ("\" alone) that separates words, and so can be replaced by a placeholder.
+//
+// Line 0 is the tail of the directive line, so a "\" there is the directive's
+// own continuation. And when no whitespace surrounds the "\" line, as in
+//
+//	echo good\
+//	\
+//	night
+//
+// the continuations join "good" and "night" into one word, so the line must be
+// left alone.
+func isEmptyContinuation(lines []string, i int) bool {
+	if i == 0 || i == len(lines)-1 {
+		return false
+	}
+	line := lines[i]
+	if strings.TrimSpace(line) != "\\" || !strings.HasSuffix(line, "\n") {
+		return false
+	}
+	if line[0] == ' ' || line[0] == '\t' {
+		return true
+	}
+	prev := strings.TrimRight(lines[i-1], " \t\n")
+	if strings.HasPrefix(strings.TrimLeft(prev, " \t"), "#") {
+		return true // comment lines are dropped, so they always end a word
+	}
+	if before, ok := strings.CutSuffix(prev, "\\"); ok && (strings.HasSuffix(before, " ") || strings.HasSuffix(before, "\t")) {
+		return true
+	}
+	next := lines[i+1]
+	return next != "" && (next[0] == ' ' || next[0] == '\t')
 }
 
 // postprocessShellComments restores backtick placeholders to real comments and
@@ -438,6 +613,30 @@ func postprocessShellComments(content string, c *Config) string {
 		lines = slices.Insert(lines, 0, "\\\n")
 	}
 
+	// Turn empty-continuation markers back into "\" lines. Each one separates
+	// what follows from what precedes it, so indent it like the next real line
+	// (shfmt may have indented the placeholder as a command argument instead).
+	nextIndent := ""
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		trimmed := strings.TrimLeft(line, " \t")
+		ws := line[:len(line)-len(trimmed)]
+		body, nl := strings.CutSuffix(trimmed, "\n")
+		if body != emptyContinuationMarker {
+			if body != "" {
+				nextIndent = ws
+			}
+			continue
+		}
+		if nextIndent == "" {
+			nextIndent = ws
+		}
+		lines[i] = nextIndent + "\\"
+		if nl {
+			lines[i] += "\n"
+		}
+	}
+
 	return strings.Join(lines, "")
 }
 
@@ -463,6 +662,9 @@ func formatRun(n *ExtendedNode, c *Config) string {
 		}
 	}
 
+	if out, ok := prependFlagsRegion(n, content, c); ok {
+		return n.directive() + " " + out
+	}
 	return n.directive() + " " + prependFlags(flags, content, c)
 }
 

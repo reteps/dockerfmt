@@ -586,3 +586,79 @@ func TestIgnoreDirective(t *testing.T) {
 	expected := "FROM scratch\n# dockerfmt-ignore\nRUN   echo   hello\nRUN echo world\n"
 	assert.Equal(t, expected, output)
 }
+
+// --- Empty continuation lines and the flags region (issue #59) ---
+
+// firstRunNode parses input and returns the node for its first RUN.
+func firstRunNode(t *testing.T, input string) *ExtendedNode {
+	t.Helper()
+	lines := strings.SplitAfter(input, "\n")
+	result, err := parser.Parse(strings.NewReader(input))
+	require.NoError(t, err)
+	root := BuildExtendedNode(result.AST, lines)
+	for _, child := range root.Children {
+		if child.directive() == "RUN" {
+			return child
+		}
+	}
+	t.Fatal("no RUN directive")
+	return nil
+}
+
+func TestScanFlagsRegion(t *testing.T) {
+	f := func(s string) flagsRegionItem { return flagsRegionItem{s, regionFlag} }
+	c := func(s string) flagsRegionItem { return flagsRegionItem{s, regionComment} }
+	sep := flagsRegionItem{"\\", regionEmptyContinuation}
+
+	tests := []struct {
+		name   string
+		input  string
+		want   []flagsRegionItem
+		wantOK bool
+	}{
+		{"no flags", "FROM a\nRUN \\\n  \\\n  echo\n", nil, false},
+		{"flags on one line", "FROM a\nRUN --network=host --mount=type=cache,target=/a echo\n",
+			[]flagsRegionItem{f("--network=host"), f("--mount=type=cache,target=/a")}, true},
+		{"leading continuation is not a separator", "FROM a\nRUN \\\n  --network=host \\\n  echo\n",
+			[]flagsRegionItem{f("--network=host")}, true},
+		{"separator after last flag", "FROM a\nRUN --network=host \\\n  \\\n  echo\n",
+			[]flagsRegionItem{f("--network=host"), sep}, true},
+		{"comment before first flag", "FROM a\nRUN \\\n  # why \\\n  --network=host \\\n  echo\n",
+			[]flagsRegionItem{c("# why \\"), f("--network=host")}, true},
+		{"comment and separator between flags", "FROM a\nRUN --mount=type=cache,target=/a \\\n  # c\n  \\\n  --network=host \\\n  echo\n",
+			[]flagsRegionItem{f("--mount=type=cache,target=/a"), c("# c"), sep, f("--network=host")}, true},
+		{"comment after last flag belongs to content", "FROM a\nRUN --network=host \\\n  # c\n  echo\n",
+			[]flagsRegionItem{f("--network=host")}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := scanFlagsRegion(firstRunNode(t, tt.input))
+			assert.Equal(t, tt.wantOK, ok)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestIsEmptyContinuation(t *testing.T) {
+	tests := []struct {
+		name  string
+		lines []string
+		i     int
+		want  bool
+	}{
+		{"directive tail", []string{"\\\n", "  echo\n"}, 0, false},
+		{"indented", []string{"echo a \\\n", "  \\\n", "  && echo b\n"}, 1, true},
+		{"trailing whitespace", []string{"echo a \\\n", "  \\  \n", "  && echo b\n"}, 1, true},
+		{"space before previous backslash", []string{"echo a \\\n", "\\\n", "&& echo b\n"}, 1, true},
+		{"next line indented", []string{"echo a\\\n", "\\\n", "  b\n"}, 1, true},
+		{"after comment", []string{"echo a \\\n", "# c\n", "\\\n", "b\n"}, 2, true},
+		{"joins a word", []string{"echo good\\\n", "\\\n", "night\n"}, 1, false},
+		{"last line", []string{"echo a \\\n", "  \\\n"}, 1, false},
+		{"not a backslash line", []string{"echo a \\\n", "  b \\\n", "  c\n"}, 1, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isEmptyContinuation(tt.lines, tt.i))
+		})
+	}
+}
