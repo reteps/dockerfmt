@@ -86,3 +86,8 @@ func TestDiffLines(t *testing.T) {
 	assert.Equal(t, []string{"a\n", "b\n"}, diffLines("a\nb\n"))
 	assert.Equal(t, []string{"a\n", "b" + noNewline + "\n"}, diffLines("a\nb"))
 }
+
+func TestDiffHeadersAreRelative(t *testing.T) {
+	diff := unifiedDiff("/abs/Dockerfile", "from a\n", "FROM a\n")
+	assert.Contains(t, diff, "--- a/abs/Dockerfile\n+++ b/abs/Dockerfile\n")
+}
