@@ -4,7 +4,6 @@ go 1.26.3
 
 require (
 	github.com/editorconfig/editorconfig-core-go/v2 v2.6.4
-	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/moby/buildkit v0.33.0
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/spf13/cobra v1.9.1

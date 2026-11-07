@@ -130,3 +130,16 @@ func TestUnknownInstructionKeptAsWritten(t *testing.T) {
 	out := FormatFileLines(strings.SplitAfter("FROM a\nFORM   b \\\n   c\n", "\n"), &Config{IndentSize: 4, TrailingNewline: true})
 	assert.Equal(t, "FROM a\nFORM   b \\\n   c\n", out)
 }
+
+func TestCmdJSONKeepsFlags(t *testing.T) {
+	out := FormatFileLines(strings.SplitAfter("FROM a\nCMD --doit [ \"a\", \"b\" ]\n", "\n"), &Config{IndentSize: 4, TrailingNewline: true})
+	assert.Equal(t, "FROM a\nCMD --doit [\"a\", \"b\"]\n", out)
+}
+
+func TestCopyKeepsEndOfFlags(t *testing.T) {
+	c := &Config{IndentSize: 4, TrailingNewline: true, OnFallback: func(line int, reason string) {
+		t.Errorf("line %d: unexpected fallback: %s", line, reason)
+	}}
+	out := FormatFileLines(strings.SplitAfter("FROM a\nCOPY --chown=1  --  --weird /tmp/\nCOPY [\"a\\\"b\", \"c\"]\n", "\n"), c)
+	assert.Equal(t, "FROM a\nCOPY --chown=1 -- --weird /tmp/\nCOPY a\"b c\n", out)
+}

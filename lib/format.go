@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 
-	"github.com/google/shlex"
 	"github.com/moby/buildkit/frontend/dockerfile/command"
 	"github.com/moby/buildkit/frontend/dockerfile/parser"
 	"mvdan.cc/sh/v3/syntax"
@@ -588,25 +588,14 @@ func formatBasic(n *ExtendedNode, c *Config) string {
 	return n.directive() + " " + reindentContinuations(rawContent, c.IndentSize, escape, false)
 }
 
-func getCmd(n *ExtendedNode, shouldSplitNode bool) []string {
-	cmd := []string{}
+// shellFormArgs returns the arguments of a space-separated directive.
+func shellFormArgs(n *ExtendedNode) []string {
+	args := []string{}
 	for node := n; node != nil; node = node.Next {
-		// Split value by whitespace
-		rawValue := strings.Trim(node.Value, " \t")
-		if len(node.Flags) > 0 {
-			cmd = append(cmd, node.Flags...)
-		}
-		if shouldSplitNode {
-			parts, err := shlex.Split(rawValue)
-			if err != nil {
-				panic(fmt.Errorf("splitting %q: %w", node.Value, err))
-			}
-			cmd = append(cmd, parts...)
-		} else {
-			cmd = append(cmd, rawValue)
-		}
+		args = append(args, node.Flags...)
+		args = append(args, strings.Trim(node.Value, " \t"))
 	}
-	return cmd
+	return args
 }
 
 func formatCmd(n *ExtendedNode, c *Config) string {
@@ -614,7 +603,7 @@ func formatCmd(n *ExtendedNode, c *Config) string {
 	if n.Attributes["json"] {
 		// BuildKit decides what is JSON: an argument list it can't decode
 		// (like ["a",]) is shell form, and must stay that way.
-		return n.directive() + " " + marshalJSONStringArray(jsonArgs(n.Next)) + "\n"
+		return n.directive() + " " + prependFlags(flags, marshalJSONStringArray(jsonArgs(n.Next))+"\n", c)
 	}
 	content, ok := extractDirectiveContent(n, len(flags))
 	if !ok && len(flags) > 0 {
@@ -657,18 +646,36 @@ func spaceSeparated(mode multilineMode) func(*ExtendedNode, *Config) string {
 				argSep = " \\\n" + strings.Repeat(" ", int(c.IndentSize))
 			}
 			var content string
-			if args := jsonArgs(n.Next); isJSON && !safeAsShellWords(args) {
+			switch args := jsonArgs(n.Next); {
+			case isJSON && !safeAsShellWords(args):
 				// The JSON form is the only way to pass these arguments.
 				content = marshalJSONStringArray(args)
-			} else {
-				content = strings.Join(getCmd(n.Next, isJSON), argSep)
+			case isJSON:
+				// BuildKit processes each argument the same way in both
+				// forms; only the splitting on whitespace differs.
+				content = strings.Join(args, argSep)
+			default:
+				content = strings.Join(shellFormArgs(n.Next), argSep)
+			}
+			flags := n.Flags
+			if hasEndOfFlags(n) {
+				// "--" ends the flags, so a source may start with "--".
+				flags = append(slices.Clone(flags), "--")
 			}
 			flagsMultiline := mode == flagsOnOwnLines && (hasLineContinuation(n) || hasMountFlag(n.Flags))
-			cmd = prependFlagsImpl(n.Flags, content, c, flagsMultiline) + "\n"
+			cmd = prependFlagsImpl(flags, content, c, flagsMultiline) + "\n"
 		}
 
 		return n.directive() + " " + cmd
 	}
+}
+
+// hasEndOfFlags reports whether the instruction has a "--" right after its
+// flags (BuildKit's parser consumes it).
+func hasEndOfFlags(n *ExtendedNode) bool {
+	fields := strings.Fields(n.Original)
+	i := 1 + len(n.Flags)
+	return i < len(fields) && fields[i] == "--"
 }
 
 // jsonArgs returns the decoded arguments of a JSON-form directive.
