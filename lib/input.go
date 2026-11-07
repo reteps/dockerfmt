@@ -3,6 +3,7 @@ package lib
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -14,16 +15,21 @@ const utf8BOM = "\xEF\xBB\xBF"
 // formatContent formats a whole Dockerfile. The formatter works on "\n"
 // line endings and a file without a byte order mark; both are restored
 // afterwards. The output uses "\r\n" if most of the input's lines do, so a
-// file that mixes line endings gets the dominant one throughout.
-//
-// BuildKit keeps the "\r" of a "\r\n" in heredoc bodies and quoted values,
-// so a file that consistently uses "\r\n" reads the same before and after.
+// file that mixes line endings gets the dominant one throughout, unless that
+// would change what an instruction means: then the file is left as written.
 func formatContent(content string, c *Config) (string, error) {
+	if c.IndentSize == 0 {
+		withDefault := *c
+		withDefault.IndentSize = DefaultIndentSize
+		c = &withDefault
+	}
 	bom := strings.HasPrefix(content, utf8BOM)
-	content = strings.TrimPrefix(content, utf8BOM)
-	crlf := usesCRLF(content)
-	content = strings.ReplaceAll(content, "\r\n", "\n")
-	lines := strings.SplitAfter(strings.TrimSuffix(content, "\n"), "\n")
+	original := strings.TrimPrefix(content, utf8BOM)
+	crlf := usesCRLF(original)
+	// BuildKit drops a "\r" before a line ending, and trims what remains of
+	// stray ones at the end of a line, so these are line endings too.
+	normalized := strings.TrimRight(reCRs.ReplaceAllString(original, "\n"), "\r")
+	lines := strings.SplitAfter(strings.TrimSuffix(normalized, "\n"), "\n")
 
 	out, err := formatLines(lines, c)
 	if err != nil {
@@ -32,11 +38,19 @@ func formatContent(content string, c *Config) (string, error) {
 	if crlf {
 		out = strings.ReplaceAll(out, "\n", "\r\n")
 	}
+	if same, line := sameFile(original, out); !same {
+		if c.OnFallback != nil {
+			c.OnFallback(line, "formatting the file would change what this instruction means (are its line endings mixed?)")
+		}
+		return content, nil
+	}
 	if bom {
 		out = utf8BOM + out
 	}
 	return out, nil
 }
+
+var reCRs = regexp.MustCompile(`\r+\n`)
 
 // usesCRLF reports whether content's line endings are mostly "\r\n". A tie is
 // decided by the first line ending.

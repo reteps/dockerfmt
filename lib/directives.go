@@ -1,7 +1,6 @@
 package lib
 
 import (
-	"slices"
 	"strings"
 
 	"github.com/moby/buildkit/frontend/dockerfile/command"
@@ -49,6 +48,10 @@ func formatNode(n *node, c *Config) (out string, ok bool) {
 }
 
 func formatRun(n *node, c *Config) string {
+	region, ok := scanFlagsRegion(n)
+	if !ok {
+		return n.source
+	}
 	ctx := n.context()
 	var content string
 	switch {
@@ -62,47 +65,68 @@ func formatRun(n *node, c *Config) string {
 		}
 		content, _ = n.heredocs(script)
 	case n.Attributes["json"]:
+		if n.hasCommentLines() {
+			return n.source
+		}
 		content = marshalJSONStringArray(n.args()) + "\n"
+	case strings.TrimSpace(region.content) == "":
+		return bareInstruction(n.keyword(), region.flags())
 	default:
-		content, _ = n.content(len(n.Flags))
+		content = region.content
 		if ctx.formatsShell() {
 			content = formatShellBody(content, c)
 		}
 	}
 
-	if out, ok := withFlagLines(n, content, c); ok {
-		return n.keyword() + " " + out
+	if region.hasLines() {
+		return n.keyword() + " " + withFlagLines(&region, content, c)
 	}
-	return n.keyword() + " " + withFlags(n.Flags, content, c)
+	return n.keyword() + " " + withFlags(region.flags(), content, c)
 }
 
 // formatCmd formats CMD, ENTRYPOINT and SHELL.
 func formatCmd(n *node, c *Config) string {
+	region, ok := scanFlagsRegion(n)
+	if !ok {
+		return n.source
+	}
 	if n.Attributes["json"] {
+		if n.hasCommentLines() {
+			return n.source
+		}
 		// BuildKit decides what is JSON: an argument list it can't decode,
 		// like ["a",], is shell form and must stay that way.
-		return n.keyword() + " " + withFlags(n.Flags, marshalJSONStringArray(n.args())+"\n", c)
+		return n.keyword() + " " + withFlags(region.flags(), marshalJSONStringArray(n.args())+"\n", c)
 	}
-	content, ok := n.content(len(n.Flags))
-	if !ok && len(n.Flags) > 0 {
-		return n.keyword() + "\n"
+	content := region.content
+	if strings.TrimSpace(content) == "" {
+		return bareInstruction(n.keyword(), region.flags())
 	}
 	if n.context().formatsShell() {
 		content = formatShellBody(content, c)
 	}
-	return n.keyword() + " " + withFlags(n.Flags, content, c)
+	return n.keyword() + " " + withFlags(region.flags(), content, c)
+}
+
+// bareInstruction formats an instruction that has no arguments after its
+// flags.
+func bareInstruction(keyword string, flags []string) string {
+	return strings.Join(append([]string{keyword}, flags...), " ") + "\n"
 }
 
 func formatEnv(n *node, c *Config) string {
 	if n.next == nil {
-		return n.keyword()
+		return n.keyword() + "\n"
 	}
 	// BuildKit parses the legacy "ENV key value" form into a key/value pair
 	// whose third node, the delimiter, is empty.
 	if n.next.next.next.Value == "" {
+		if n.hasCommentLines() {
+			return n.source
+		}
 		return formatLegacyEnv(n.keyword(), n.next.Value, n.next.next.Value)
 	}
-	content, ok := n.content(0)
+	content, ok := n.content()
 	if !ok {
 		return n.source
 	}
@@ -137,7 +161,7 @@ func formatWords(n *node, c *Config) string {
 	if heredoc, ok := n.heredocs(nil); ok {
 		return indentFollowingLines(n.keyword()+" "+heredoc, c.IndentSize)
 	}
-	content, ok := n.content(0)
+	content, ok := n.content()
 	if !ok {
 		return n.keyword() + "\n"
 	}
@@ -171,8 +195,15 @@ const (
 // flags and space-separated words (COPY, ADD, EXPOSE, FROM, WORKDIR).
 func spaceSeparated(mode multilineMode) directiveFormatter {
 	return func(n *node, c *Config) string {
+		region, ok := scanFlagsRegion(n)
+		if !ok || n.hasCommentLines() {
+			// The arguments are rebuilt from BuildKit's parse, which has no
+			// comments.
+			return n.source
+		}
+		flags := region.flags()
 		if heredoc, ok := n.heredocs(nil); ok {
-			return n.keyword() + " " + layoutFlags(n.Flags, heredoc, c, false)
+			return n.keyword() + " " + layoutFlags(flags, heredoc, c, false)
 		}
 
 		sep := " "
@@ -193,12 +224,10 @@ func spaceSeparated(mode multilineMode) directiveFormatter {
 			}
 			content = strings.Join(args, sep)
 		}
-
-		flags := n.Flags
-		if n.hasEndOfFlags() {
-			flags = append(slices.Clone(flags), "--")
+		if content == "" {
+			return bareInstruction(n.keyword(), flags)
 		}
-		onOwnLines := mode == flagsOnOwnLines && (n.multiline() || hasMountFlag(n.Flags))
+		onOwnLines := mode == flagsOnOwnLines && (n.multiline() || hasMountFlag(flags))
 		return n.keyword() + " " + layoutFlags(flags, content, c, onOwnLines) + "\n"
 	}
 }
@@ -219,6 +248,9 @@ const maintainerLabel = "org.opencontainers.image.authors"
 
 // formatMaintainer rewrites the deprecated MAINTAINER as the equivalent LABEL.
 func formatMaintainer(n *node, _ *Config) string {
+	if n.hasCommentLines() {
+		return n.source
+	}
 	// MAINTAINER takes the rest of the line as is, while LABEL processes
 	// quotes, escapes and variables, so those are escaped.
 	value := strings.NewReplacer(`\`, `\\`, `"`, `\"`, `$`, `\$`).Replace(unwrapMaintainerQuotes(n.next.Value))
@@ -235,7 +267,7 @@ func unwrapMaintainerQuotes(s string) string {
 }
 
 func formatOnbuild(n *node, c *Config) string {
-	if n.next == nil || len(n.next.children) != 1 {
+	if n.next == nil || len(n.next.children) != 1 || n.hasCommentLines() {
 		return n.source
 	}
 	// The trigger runs with the shell the image ends up with, which is the

@@ -1,0 +1,4 @@
+go test fuzz v1
+string("\n0\r\r")
+uint(28)
+bool(true)

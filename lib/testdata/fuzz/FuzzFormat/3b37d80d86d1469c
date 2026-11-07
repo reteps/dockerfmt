@@ -1,0 +1,4 @@
+go test fuzz v1
+string("0000000000000000000000000\nRUN\\\n #\n ")
+uint(4)
+bool(false)

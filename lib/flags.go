@@ -1,6 +1,182 @@
 package lib
 
-import "strings"
+import (
+	"strings"
+	"unicode"
+)
+
+// flagsRegion is the part of an instruction between its keyword and its
+// content, as written. BuildKit's parse tree has the flags with their quotes
+// removed, and none of the comment or separator lines among them.
+type flagsRegion struct {
+	// items are the flags as written, with the comment and separator lines
+	// among them and any separators right after the last flag.
+	items []flagItem
+	// endOfFlags reports a "--" after the flags, which lets content start
+	// with "--".
+	endOfFlags bool
+	// content is the source after the region. Its first line is trimmed.
+	content string
+}
+
+type flagItem struct {
+	text string
+	kind flagItemKind
+}
+
+type flagItemKind int
+
+const (
+	flagItemFlag flagItemKind = iota
+	flagItemComment
+	flagItemSeparator // a line holding only "\"
+)
+
+// flags returns the flags as written, followed by "--" if there was one.
+func (r *flagsRegion) flags() []string {
+	var flags []string
+	for _, item := range r.items {
+		if item.kind == flagItemFlag {
+			flags = append(flags, item.text)
+		}
+	}
+	if r.endOfFlags {
+		flags = append(flags, "--")
+	}
+	return flags
+}
+
+// hasLines reports whether there are comment or separator lines among the
+// flags.
+func (r *flagsRegion) hasLines() bool {
+	for _, item := range r.items {
+		if item.kind != flagItemFlag {
+			return true
+		}
+	}
+	return false
+}
+
+// scanFlagsRegion reads n's flags region from its source. ok is false if the
+// flags can't be read back as written, for example a quoted flag value that
+// continues on the next line; the instruction is then best left alone.
+func scanFlagsRegion(n *node) (flagsRegion, bool) {
+	r, ok := scanFlagLines(n)
+	if ok && len(n.Flags) == 0 && !r.endOfFlags {
+		// Keep content as written after the keyword, including a leading
+		// continuation, which the shell formatter places comments after.
+		content, _ := n.content()
+		return flagsRegion{content: content}, true
+	}
+	return r, ok
+}
+
+func scanFlagLines(n *node) (r flagsRegion, ok bool) {
+	escape := n.context().escape
+	lines := strings.SplitAfter(n.text(), "\n")
+	read := 0
+	for li, line := range lines {
+		if line == "" {
+			continue
+		}
+		text := strings.TrimSuffix(line, "\n")
+		body, continues := text, false
+		if li < len(lines)-1 {
+			if j, ok := isContinuation(text, escape); ok {
+				body, continues = text[:j], true
+			}
+		}
+
+		pos := 0
+		if li == 0 {
+			pos = len(body) - len(strings.TrimLeft(body, " \t"))
+			pos += wordEnd(body, pos, escape) // the keyword
+		} else {
+			switch trimmed := strings.TrimSpace(body); {
+			case strings.HasPrefix(strings.TrimSpace(text), "#"):
+				if read == len(n.Flags) {
+					// A comment after the flags belongs to the content.
+					r.content = strings.TrimLeft(strings.Join(lines[li:], ""), " \t")
+					return r, true
+				}
+				r.items = append(r.items, flagItem{strings.TrimSpace(text), flagItemComment})
+				continue
+			case strings.TrimSpace(text) == "":
+				continue // blank lines inside a continuation are dropped
+			case trimmed == "" && continues:
+				r.items = append(r.items, flagItem{"\\", flagItemSeparator})
+				continue
+			}
+		}
+
+		for {
+			pos += len(body[pos:]) - len(strings.TrimLeft(body[pos:], " \t"))
+			if pos == len(body) {
+				break
+			}
+			end := pos + wordEnd(body, pos, escape)
+			word := body[pos:end]
+			if read == len(n.Flags) {
+				if word == "--" && !r.endOfFlags {
+					r.endOfFlags = true
+					pos = end
+					continue
+				}
+				r.content = text[pos:] + strings.Join(lines[li:], "")[len(text):]
+				return r, true
+			}
+			if !strings.HasPrefix(word, "--") || end == len(body) && continues && gluesToNext(text, lines[li+1:]) {
+				// Not a flag, or a flag joined to the next line's first word.
+				return flagsRegion{}, false
+			}
+			r.items = append(r.items, flagItem{word, flagItemFlag})
+			read++
+			pos = end
+		}
+		if !continues {
+			break
+		}
+	}
+	return r, read == len(n.Flags)
+}
+
+// wordEnd returns the length of the word starting at s[pos:], following
+// BuildKit's word splitting: whitespace separates words except inside quotes,
+// and the escape character escapes the next character except inside single
+// quotes. An unterminated quote extends the word to the end of s.
+func wordEnd(s string, pos int, escape rune) int {
+	var quote rune
+	escaped := false
+	for i, ch := range s[pos:] {
+		switch {
+		case escaped:
+			escaped = false
+		case ch == escape && quote != '\'':
+			escaped = true
+		case quote != 0:
+			if ch == quote {
+				quote = 0
+			}
+		case ch == '\'' || ch == '"':
+			quote = ch
+		case unicode.IsSpace(ch):
+			return i
+		}
+	}
+	return len(s) - pos
+}
+
+// gluesToNext reports whether the last word of line, which ends in a
+// continuation, runs on into the first word of the next line: BuildKit joins
+// the lines without adding whitespace.
+func gluesToNext(line string, next []string) bool {
+	t := strings.TrimRight(line, " \t")
+	t = t[:len(t)-1] // the escape character
+	if strings.HasSuffix(t, " ") || strings.HasSuffix(t, "\t") || len(next) == 0 {
+		return false
+	}
+	return next[0] != "" && !strings.ContainsRune(" \t\n", rune(next[0][0]))
+}
 
 // withFlags puts flags before content. Each flag goes on its own continuation
 // line if any of them is a --mount flag, which tend to be long.
@@ -26,6 +202,29 @@ func layoutFlags(flags []string, content string, c *Config, onOwnLines bool) str
 	return b.String()
 }
 
+// withFlagLines lays out a flags region that has comment or separator lines:
+// each flag, comment and separator goes on its own line.
+func withFlagLines(r *flagsRegion, content string, c *Config) string {
+	indent := c.indent()
+	var b strings.Builder
+	if r.items[0].kind != flagItemFlag {
+		// A comment or separator can't share the keyword's line.
+		b.WriteString("\\\n" + indent)
+	}
+	for _, item := range r.items {
+		b.WriteString(item.text)
+		if item.kind == flagItemFlag {
+			b.WriteString(" \\")
+		}
+		b.WriteString("\n" + indent)
+	}
+	if r.endOfFlags {
+		b.WriteString("-- ")
+	}
+	b.WriteString(trimLeadingContinuation(content))
+	return b.String()
+}
+
 // trimLeadingContinuation drops a leading "\" continuation and the indentation
 // after it. Formatted shell content starts with one when its first line is a
 // comment; after a flag line, which already ends in "\", it would be doubled.
@@ -43,107 +242,4 @@ func hasMountFlag(flags []string) bool {
 		}
 	}
 	return false
-}
-
-// flagItem is one line-level element of the flags region, the part of an
-// instruction between its keyword and its content.
-type flagItem struct {
-	text string
-	kind flagItemKind
-}
-
-type flagItemKind int
-
-const (
-	flagItemFlag flagItemKind = iota
-	flagItemComment
-	flagItemSeparator // a line holding only "\"
-)
-
-// scanFlags walks n's source from the keyword through its flags and returns
-// the flags interleaved with the comment and separator lines among them, plus
-// separators right after the last flag. BuildKit drops those lines, so they are
-// recovered from the source. ok is false if n has no flags or they can't be
-// found in the source.
-func scanFlags(n *node) (items []flagItem, ok bool) {
-	if len(n.Flags) == 0 {
-		return nil, false
-	}
-	rest := strings.TrimLeft(n.text(), " \t")
-	i := strings.IndexAny(rest, " \t\\\n")
-	if i < 0 {
-		return nil, false
-	}
-	rest = rest[i:]
-
-	flags := n.Flags
-	atLineStart := false
-	for {
-		rest = strings.TrimLeft(rest, " \t")
-		switch {
-		case strings.HasPrefix(rest, "\\\n"):
-			if atLineStart {
-				items = append(items, flagItem{"\\", flagItemSeparator})
-			}
-			rest = rest[2:]
-			atLineStart = true
-			continue
-		case atLineStart && strings.HasPrefix(rest, "\n"):
-			rest = rest[1:] // blank line inside the continuation
-			continue
-		case len(flags) > 0 && atLineStart && strings.HasPrefix(rest, "#"):
-			// A comment after the last flag belongs to the content.
-			line, after, _ := strings.Cut(rest, "\n")
-			items = append(items, flagItem{strings.TrimRight(line, " \t"), flagItemComment})
-			rest = after
-			continue
-		case len(flags) > 0 && strings.HasPrefix(rest, flags[0]):
-			items = append(items, flagItem{flags[0], flagItemFlag})
-			rest = rest[len(flags[0]):]
-			flags = flags[1:]
-			atLineStart = false
-			continue
-		}
-		break
-	}
-	if len(flags) > 0 {
-		return nil, false
-	}
-	return items, true
-}
-
-// withFlagLines is withFlags for an instruction whose flags region has comment
-// or separator lines: each flag, comment and separator goes on its own line.
-// ok is false if there are no such lines, so the usual layout applies.
-func withFlagLines(n *node, content string, c *Config) (string, bool) {
-	items, ok := scanFlags(n)
-	if !ok {
-		return "", false
-	}
-	onlyFlags := true
-	for _, item := range items {
-		if item.kind != flagItemFlag {
-			onlyFlags = false
-			break
-		}
-	}
-	if onlyFlags {
-		return "", false
-	}
-
-	indent := c.indent()
-	var b strings.Builder
-	if items[0].kind != flagItemFlag {
-		// A comment or separator can't share the keyword's line.
-		b.WriteString("\\\n" + indent)
-	}
-	for _, item := range items {
-		b.WriteString(item.text)
-		if item.kind == flagItemFlag {
-			b.WriteString(" \\")
-		}
-		b.WriteString("\n" + indent)
-	}
-	b.WriteString(trimLeadingContinuation(content))
-	return b.String(), true
 }

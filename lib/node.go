@@ -66,36 +66,20 @@ func (n *node) multiline() bool {
 	return strings.Contains(n.source, "\\\n")
 }
 
-// content returns the source text after the keyword and the first flagCount
-// flags (with the continuations that follow them). ok is false if there is
-// nothing after them.
-func (n *node) content(flagCount int) (string, bool) {
+// content returns the source text after the keyword and the whitespace
+// character following it, if any. ok is false if there is nothing after the
+// keyword.
+func (n *node) content() (string, bool) {
 	src := strings.TrimLeft(n.text(), " \t")
-
-	if flagCount == 0 {
-		i := strings.IndexAny(src, " \t")
-		if i < 0 {
-			return "", false
-		}
-		return src[i+1:], true
-	}
-
-	// Flags can span lines, so locate the last one in the source.
-	lastFlag := n.Flags[flagCount-1]
-	i := strings.LastIndex(src, lastFlag)
-	if i < 0 {
+	end := strings.IndexFunc(src, func(r rune) bool { return r == ' ' || r == '\t' || r == n.context().escape })
+	if end < 0 {
 		return "", false
 	}
-	rest := src[i+len(lastFlag):]
-	for {
-		rest = strings.TrimLeft(rest, " \t")
-		after, ok := strings.CutPrefix(rest, "\\\n")
-		if !ok {
-			break
-		}
-		rest = after
+	rest := src[end:]
+	if rest[0] == ' ' || rest[0] == '\t' {
+		rest = rest[1:]
 	}
-	return rest, rest != ""
+	return rest, true
 }
 
 // args returns the instruction's arguments as BuildKit parsed them. For the
@@ -133,10 +117,26 @@ func (n *node) heredocs(firstBody *string) (string, bool) {
 	return b.String(), true
 }
 
-// hasEndOfFlags reports whether a "--" follows the flags. BuildKit's parser
-// consumes it, but it lets a source path start with "--".
-func (n *node) hasEndOfFlags() bool {
-	fields := strings.Fields(n.Original)
-	i := 1 + len(n.Flags)
-	return i < len(fields) && fields[i] == "--"
+// hasCommentLines reports whether there are comment lines among the
+// instruction's continuation lines. Heredoc bodies don't count.
+func (n *node) hasCommentLines() bool {
+	escape := n.context().escape
+	lines := strings.SplitAfter(n.source, "\n")
+	for i := 1; i < len(lines); i++ {
+		prev := strings.TrimSuffix(lines[i-1], "\n")
+		if _, ok := isContinuation(prev, escape); !ok && !isDroppedLine(prev) {
+			return false // the instruction ended; heredoc bodies may follow
+		}
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), "#") {
+			return true
+		}
+	}
+	return false
+}
+
+// isDroppedLine reports whether BuildKit drops line when it appears inside a
+// continuation: a comment or blank line.
+func isDroppedLine(line string) bool {
+	t := strings.TrimSpace(line)
+	return t == "" || strings.HasPrefix(t, "#")
 }

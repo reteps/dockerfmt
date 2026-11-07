@@ -17,6 +17,17 @@ func parseOne(t *testing.T, src string) *parser.Node {
 	return res.AST.Children[0]
 }
 
+// equivalentSource is equivalent, with the formatted instruction given as
+// source the way the formatter checks it.
+func equivalentSource(t *testing.T, original, formatted string, ctx instrContext) (bool, string) {
+	t.Helper()
+	n, err := parseFormatted(formatted, ctx)
+	if err != nil {
+		return false, err.Error()
+	}
+	return equivalent(parseOne(t, original), n.Node, ctx)
+}
+
 func TestEquivalent(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -45,7 +56,7 @@ func TestEquivalent(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, reason := equivalent(parseOne(t, tt.original), tt.formatted, defaultContext())
+			got, reason := equivalentSource(t, tt.original, tt.formatted, defaultContext())
 			assert.Equal(t, tt.want, got, reason)
 		})
 	}
@@ -56,7 +67,7 @@ func TestEquivalentNonPOSIXShellIsExact(t *testing.T) {
 	ctx.posixShell = false
 	// A shell parser would read both as the same command, but PowerShell
 	// doesn't treat "\ " as an escaped space.
-	got, _ := equivalent(parseOne(t, "RUN dir C:\\ | x\n"), "RUN dir C:\\  | x\n", ctx)
+	got, _ := equivalentSource(t, "RUN dir C:\\ | x\n", "RUN dir C:\\  | x\n", ctx)
 	assert.False(t, got)
 }
 

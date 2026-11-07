@@ -14,23 +14,31 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 )
 
-// equivalent reports whether formatted, the formatter's output for original,
-// means the same to BuildKit as original. reason explains a mismatch.
-func equivalent(original *parser.Node, formatted string, ctx instrContext) (ok bool, reason string) {
-	want, wantErr := semanticKey(original, ctx)
-
+// parseFormatted parses formatted, the formatter's output for one
+// instruction, in context ctx. It fails unless that is exactly one
+// instruction.
+func parseFormatted(formatted string, ctx instrContext) (*node, error) {
 	src := formatted
 	if ctx.escape != '\\' {
 		src = "# escape=" + string(ctx.escape) + "\n" + src
 	}
 	res, err := parser.Parse(strings.NewReader(src))
 	if err != nil {
-		return false, fmt.Sprintf("output does not parse: %v", err)
+		return nil, fmt.Errorf("output does not parse: %w", err)
 	}
 	if len(res.AST.Children) != 1 {
-		return false, fmt.Sprintf("output parses as %d instructions", len(res.AST.Children))
+		return nil, fmt.Errorf("output parses as %d instructions", len(res.AST.Children))
 	}
-	got, gotErr := semanticKey(res.AST.Children[0], ctx)
+	n := newNode(res.AST.Children[0], strings.SplitAfter(src, "\n"))
+	n.ctx = &ctx
+	return n, nil
+}
+
+// equivalent reports whether formatted, the formatter's output for original,
+// means the same to BuildKit as original. reason explains a mismatch.
+func equivalent(original, formatted *parser.Node, ctx instrContext) (ok bool, reason string) {
+	want, wantErr := semanticKey(original, ctx)
+	got, gotErr := semanticKey(formatted, ctx)
 	switch {
 	case wantErr != nil && gotErr != nil:
 		// An already invalid instruction (e.g. "ONBUILD ARG" with no name) can't
@@ -44,6 +52,57 @@ func equivalent(original *parser.Node, formatted string, ctx instrContext) (ok b
 		return false, "output differs in meaning"
 	}
 	return true, ""
+}
+
+// sameFile reports whether BuildKit reads the whole files a and b as the same
+// instructions with the same meaning. line is the first line in a of an
+// instruction that differs.
+//
+// Format checks each instruction as it formats it, on input with normalized
+// line endings. This checks the files as written, which differ from what was
+// checked when the input mixes line endings: BuildKit keeps the "\r" of a
+// "\r\n" in heredoc bodies and quoted values.
+func sameFile(a, b string) (same bool, line int) {
+	ka, la, errA := fileKeys(a)
+	kb, _, errB := fileKeys(b)
+	if errA != nil || errB != nil {
+		return false, 1
+	}
+	for i := range ka {
+		if i >= len(kb) || ka[i] != kb[i] {
+			return false, la[i]
+		}
+	}
+	if len(kb) > len(ka) {
+		return false, 1
+	}
+	return true, 0
+}
+
+// fileKeys returns the semantic key of each instruction of the file content,
+// and the line each starts on.
+func fileKeys(content string) (keys []string, lines []int, err error) {
+	res, err := parser.Parse(strings.NewReader(content))
+	if err != nil {
+		return nil, nil, err
+	}
+	ctx := defaultContext()
+	if res.EscapeToken != 0 {
+		ctx.escape = res.EscapeToken
+	}
+	for _, n := range res.AST.Children {
+		key, err := semanticKey(n, ctx)
+		if err != nil {
+			// As in equivalent, an instruction that stays invalid is
+			// unchanged. The error can't be compared: its "did you mean"
+			// suggestion varies between runs.
+			key = "invalid " + strings.ToUpper(n.Value)
+		}
+		keys = append(keys, key)
+		lines = append(lines, n.StartLine)
+		ctx.update(n)
+	}
+	return keys, lines, nil
 }
 
 // semanticKey describes what BuildKit does with instruction n, such that two
@@ -103,6 +162,8 @@ func semanticKey(n *parser.Node, ctx instrContext) (string, error) {
 		}
 	case *instructions.RunCommand:
 		canonCmdLine(&c.ShellDependantCmdLine)
+		// BuildKit collects these from a map, in no fixed order.
+		slices.Sort(c.FlagsUsed)
 		if isShellScriptHeredoc(n, ctx) {
 			c.Files[0].Data = canonicalShell(c.Files[0].Data)
 		}
@@ -143,6 +204,22 @@ func expander(escape rune) instructions.SingleWordExpander {
 // canonicalShell returns s in a form that ignores layout, so two commands
 // that differ only in whitespace and line breaks compare equal.
 func canonicalShell(s string) string {
+	// mvdan/sh reads "\r", "\v" and "\f" as blanks, while the shell takes them
+	// literally. A script with "\r\n" line endings keeps them when formatted,
+	// so only their presence counts; anywhere else, the layout around these
+	// characters matters.
+	prefix := ""
+	if strings.Contains(s, "\r\n") {
+		prefix = "crlf:"
+		s = strings.ReplaceAll(s, "\r\n", "\n")
+	}
+	if strings.ContainsAny(s, "\v\f\r") {
+		return "unparsed:" + prefix + s
+	}
+	return prefix + printCanonical(s)
+}
+
+func printCanonical(s string) string {
 	f, err := syntax.NewParser().Parse(strings.NewReader(s), "")
 	if err != nil {
 		return "unparsed:" + s

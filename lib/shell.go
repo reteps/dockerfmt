@@ -25,6 +25,7 @@ package lib
 import (
 	"bytes"
 	"strings"
+	"unicode"
 
 	"mvdan.cc/sh/v3/syntax"
 )
@@ -120,7 +121,7 @@ func splitShellBody(content string) (shellBody, bool) {
 
 		// A code line. Trailing whitespace after a final "\" still makes a
 		// continuation for BuildKit but would escape a space for the shell.
-		code := strings.TrimRight(line, " \t\r\n")
+		code := strings.TrimRightFunc(line, unicode.IsSpace)
 		if strings.HasSuffix(line, "\n") {
 			code += "\n"
 		}
@@ -138,6 +139,10 @@ func splitShellBody(content string) (shellBody, bool) {
 
 	body.src = src.String()
 	if strings.Trim(body.src, " \t\\\n") == "" {
+		return shellBody{}, false
+	}
+	if strings.ContainsAny(body.src, "\v\f\r") {
+		// mvdan/sh reads these as blanks; the shell doesn't.
 		return shellBody{}, false
 	}
 	return body, true
@@ -170,8 +175,15 @@ func isEmptyContinuation(lines []string, i int) bool {
 	if strings.HasPrefix(strings.TrimLeft(prev, " \t"), "#") {
 		return true // comment lines are dropped, so they always end a word
 	}
-	if before, ok := strings.CutSuffix(prev, "\\"); ok && (strings.HasSuffix(before, " ") || strings.HasSuffix(before, "\t")) {
-		return true
+	if before, ok := strings.CutSuffix(prev, "\\"); ok {
+		if strings.HasSuffix(before, " ") || strings.HasSuffix(before, "\t") {
+			return true
+		}
+		if strings.TrimSpace(before) == "" && (i == 1 || isEmptyContinuation(lines, i-1)) {
+			// The previous line is the directive tail, which follows the
+			// keyword's whitespace, or another separator.
+			return true
+		}
 	}
 	next := lines[i+1]
 	return next != "" && (next[0] == ' ' || next[0] == '\t')
@@ -196,7 +208,7 @@ func parseShell(src string) (*syntax.File, error) {
 // Dockerfile instruction (the printer puts "a; b" on separate lines, for one).
 func printShell(src string, c *Config) (string, bool) {
 	f, err := parseShell(src)
-	if err != nil {
+	if err != nil || hasInnerComment(f, src) {
 		return "", false
 	}
 	var buf bytes.Buffer
@@ -204,6 +216,11 @@ func printShell(src string, c *Config) (string, bool) {
 		return "", false
 	}
 	out := buf.String()
+	if strings.HasSuffix(strings.TrimRight(out, "\n"), "\\") {
+		// A dangling escape at the end of the command, which the printer
+		// follows with a blank line.
+		return "", false
+	}
 	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
 	for _, l := range lines[:len(lines)-1] {
 		if !strings.HasSuffix(l, "\\") {
@@ -211,6 +228,21 @@ func printShell(src string, c *Config) (string, bool) {
 		}
 	}
 	return out, true
+}
+
+// hasInnerComment reports whether a shell comment in src is followed by more
+// code. BuildKit joins the continued lines before the shell sees them, so such
+// a comment runs on to the end of the instruction, while mvdan/sh ends it at
+// the line break.
+func hasInnerComment(f *syntax.File, src string) bool {
+	found := false
+	syntax.Walk(f, func(n syntax.Node) bool {
+		if cm, ok := n.(*syntax.Comment); ok && strings.TrimSpace(src[cm.End().Offset():]) != "" {
+			found = true
+		}
+		return !found
+	})
+	return found
 }
 
 // syntaxPositions lists the offsets of every node of f (plus the operator of
@@ -235,10 +267,12 @@ func syntaxPositions(f *syntax.File) []int {
 // the printed form of body.src.
 //
 // Each group of lines anchored to the same token goes on its own lines before
-// the output line holding that token, with that line's indentation. Before a
-// line starting with an operator ("&& cmd"), a group the user indented past
-// the next command instead takes the indentation of the line above, so a
-// comment written under an argument list stays with the arguments.
+// the output line holding that token, with that line's indentation. A token in
+// the middle of a line first gets a line break before it, and the result is
+// printed again so mvdan/sh indents the new line. Before a line starting with
+// an operator ("&& cmd"), a group the user indented past the next command
+// instead takes the indentation of the line above, so a comment written under
+// an argument list stays with the arguments.
 func reinsertLines(body shellBody, out string, c *Config) (string, bool) {
 	if len(body.inserts) == 0 {
 		return out, true
@@ -247,40 +281,95 @@ func reinsertLines(body shellBody, out string, c *Config) (string, bool) {
 	if err != nil {
 		return "", false
 	}
+	tokens := make(map[int]int) // source offset -> index in walk order
+	for i, p := range syntaxPositions(srcFile) {
+		if _, ok := tokens[p]; !ok {
+			tokens[p] = i
+		}
+	}
+	nodes := len(syntaxPositions(srcFile))
+
+	groups, ok := groupInserts(body.inserts, tokens, nodes, out)
+	if !ok {
+		return "", false
+	}
+	if breaks := midLineOffsets(groups, out); len(breaks) > 0 {
+		for i := len(breaks) - 1; i >= 0; i-- {
+			at := breaks[i]
+			out = strings.TrimRight(out[:at], " \t") + " \\\n" + out[at:]
+		}
+		if out, ok = printShell(out, c); !ok {
+			return "", false
+		}
+		if groups, ok = groupInserts(body.inserts, tokens, nodes, out); !ok {
+			return "", false
+		}
+		if len(midLineOffsets(groups, out)) > 0 {
+			return "", false
+		}
+	}
+	return placeGroups(groups, out, c), true
+}
+
+// insertGroup is a run of inserted lines anchored to the same output offset.
+type insertGroup struct {
+	offset int
+	texts  []string
+	deeper bool // of the group's first line
+}
+
+// groupInserts maps the anchors of inserts to offsets in out, grouping lines
+// that share one. tokens maps source offsets to walk-order indexes, and nodes
+// is the number of positions syntaxPositions gives for the source.
+func groupInserts(inserts []shellInsert, tokens map[int]int, nodes int, out string) ([]insertGroup, bool) {
 	outFile, err := parseShell(out)
 	if err != nil {
-		return "", false
+		return nil, false
 	}
-	srcPos, outPos := syntaxPositions(srcFile), syntaxPositions(outFile)
-	if len(srcPos) != len(outPos) {
-		return "", false
+	outPos := syntaxPositions(outFile)
+	if len(outPos) != nodes {
+		return nil, false
 	}
-
-	// Map anchors to output offsets, grouping lines that share one.
-	type group struct {
-		offset int
-		texts  []string
-		deeper bool // of the group's first line
-	}
-	var groups []group
+	var groups []insertGroup
 	end := len(strings.TrimRight(out, "\n"))
-	for _, ins := range body.inserts {
+	for _, ins := range inserts {
 		offset := end
 		if ins.anchor >= 0 {
-			j := indexOf(srcPos, ins.anchor)
-			if j < 0 {
-				return "", false // anchor isn't a token start (e.g. inside a word)
+			j, ok := tokens[ins.anchor]
+			if !ok {
+				return nil, false // anchor isn't a token start (e.g. inside a word)
 			}
 			offset = outPos[j]
 		}
 		if n := len(groups); n > 0 && groups[n-1].offset == offset {
 			groups[n-1].texts = append(groups[n-1].texts, ins.text)
 		} else {
-			groups = append(groups, group{offset, []string{ins.text}, ins.deeper})
+			groups = append(groups, insertGroup{offset, []string{ins.text}, ins.deeper})
 		}
 	}
+	return groups, true
+}
 
-	baseIndent := strings.Repeat(" ", int(c.IndentSize))
+// midLineOffsets returns the offsets of the groups whose token is preceded
+// on its line by something other than indentation or an operator, in order.
+func midLineOffsets(groups []insertGroup, out string) []int {
+	end := len(strings.TrimRight(out, "\n"))
+	var offsets []int
+	for _, g := range groups {
+		if g.offset >= end {
+			continue
+		}
+		lineStart := strings.LastIndexByte(out[:g.offset], '\n') + 1
+		if prefix := strings.TrimLeft(out[lineStart:g.offset], " \t"); prefix != "" && !isOperator(prefix) {
+			offsets = append(offsets, g.offset)
+		}
+	}
+	return offsets
+}
+
+// placeGroups inserts groups, none of which is mid-line, into out.
+func placeGroups(groups []insertGroup, out string, c *Config) string {
+	baseIndent := c.indent()
 	render := func(texts []string, indent string) string {
 		var b strings.Builder
 		for _, t := range texts {
@@ -295,26 +384,24 @@ func reinsertLines(body shellBody, out string, c *Config) (string, bool) {
 		atEnd = iota
 		atFirstToken
 		beforeLine
-		midLine
 	)
 	type placement struct {
 		kind      int
 		lineStart int
 		indent    string
 	}
+	end := len(strings.TrimRight(out, "\n"))
 	places := make([]placement, len(groups))
 	for gi, g := range groups {
-		if g.offset >= end {
-			lastStart := strings.LastIndexByte(out[:end], '\n') + 1
-			places[gi] = placement{atEnd, lastStart, lineIndent(out, lastStart, baseIndent)}
-			continue
-		}
-		lineStart := strings.LastIndexByte(out[:g.offset], '\n') + 1
-		prefix := strings.TrimLeft(out[lineStart:g.offset], " \t")
+		lineStart := strings.LastIndexByte(out[:min(g.offset, end)], '\n') + 1
 		switch {
-		case lineStart == 0 && prefix == "":
+		case g.offset >= end:
+			// The last line doesn't continue, so these lines come after the
+			// instruction, as top-level comments.
+			places[gi] = placement{kind: atEnd}
+		case lineStart == 0 && strings.TrimSpace(out[:g.offset]) == "":
 			places[gi] = placement{atFirstToken, 0, baseIndent}
-		case prefix == "" || isOperator(prefix):
+		default:
 			indent := lineIndent(out, lineStart, baseIndent)
 			if g.deeper && lineStart > 0 && startsWithOperator(out[lineStart:]) {
 				// The user indented these lines past the next command, so
@@ -324,8 +411,6 @@ func reinsertLines(body shellBody, out string, c *Config) (string, bool) {
 				indent = lineIndent(out, prevStart, baseIndent)
 			}
 			places[gi] = placement{beforeLine, lineStart, indent}
-		default:
-			places[gi] = placement{midLine, lineStart, lineIndent(out, lineStart, baseIndent)}
 		}
 	}
 	// Groups that end up stacked before the same line share the indentation
@@ -349,21 +434,9 @@ func reinsertLines(body shellBody, out string, c *Config) (string, bool) {
 			out = "\\\n" + render(g.texts, baseIndent) + baseIndent + strings.TrimLeft(out, " \t")
 		case beforeLine:
 			out = out[:p.lineStart] + render(g.texts, p.indent) + out[p.lineStart:]
-		case midLine:
-			// Break the line before the token.
-			out = strings.TrimRight(out[:g.offset], " \t") + " \\\n" + render(g.texts, p.indent) + p.indent + out[g.offset:]
 		}
 	}
-	return out, true
-}
-
-func indexOf(s []int, v int) int {
-	for i, x := range s {
-		if x == v {
-			return i
-		}
-	}
-	return -1
+	return out
 }
 
 // lineIndent returns the indentation of the output line starting at

@@ -12,6 +12,7 @@ import (
 // Config controls formatting.
 type Config struct {
 	// IndentSize is the number of spaces continuation lines are indented by.
+	// Zero means DefaultIndentSize.
 	IndentSize uint
 	// TrailingNewline ends the output with a newline.
 	TrailingNewline bool
@@ -22,6 +23,9 @@ type Config struct {
 	// is the instruction's first line, counting from 1.
 	OnFallback func(line int, reason string)
 }
+
+// DefaultIndentSize is the indentation used when Config.IndentSize is zero.
+const DefaultIndentSize = 4
 
 func (c *Config) indent() string {
 	return strings.Repeat(" ", int(c.IndentSize))
@@ -94,17 +98,22 @@ func (f *fileFormatter) instruction(n *node) {
 	f.out.WriteString(formatComments(between))
 	f.line = n.EndLine
 
-	if hasIgnoreComment(between) {
-		f.out.WriteString(n.source)
-	} else {
-		f.out.WriteString(f.checked(n))
+	out := n.source
+	if !hasIgnoreComment(between) {
+		out = f.checked(n)
+	}
+	f.out.WriteString(out)
+	// The last line of a file may lack a line ending; anywhere else, a missing
+	// one would join this instruction with the next.
+	if !strings.HasSuffix(out, "\n") {
+		f.out.WriteByte('\n')
 	}
 	f.ctx.update(n.Node)
 }
 
-// checked formats instruction n and verifies that BuildKit reads the result
-// the same way as the original. If it doesn't, or formatting fails, n is
-// returned as written.
+// checked formats instruction n and verifies the result: BuildKit must read
+// it the same way as the original, and formatting it again must not change
+// it. If either fails, or formatting does, n is returned as written.
 func (f *fileFormatter) checked(n *node) string {
 	ctx := f.ctx
 	n.ctx = &ctx
@@ -115,9 +124,7 @@ func (f *fileFormatter) checked(n *node) string {
 		return n.source
 	}
 	if reason == "" && out != n.source {
-		if same, why := equivalent(n.Node, out, ctx); !same {
-			reason = why
-		}
+		reason = verify(n, out, f.config)
 	}
 	if reason != "" {
 		if f.config.OnFallback != nil {
@@ -126,6 +133,23 @@ func (f *fileFormatter) checked(n *node) string {
 		return n.source
 	}
 	return out
+}
+
+// verify checks out, the formatted form of n, and returns why it can't be
+// used, or "" if it can.
+func verify(n *node, out string, c *Config) string {
+	ctx := n.context()
+	formatted, err := parseFormatted(out, ctx)
+	if err != nil {
+		return err.Error()
+	}
+	if same, why := equivalent(n.Node, formatted.Node, ctx); !same {
+		return why
+	}
+	if again, _, _ := formatRecovering(formatted, c); again != out {
+		return "formatting it again would change it further"
+	}
+	return ""
 }
 
 // formatRecovering is formatNode, with a panic reported as a fallback reason.
@@ -155,7 +179,7 @@ var reBlankLines = regexp.MustCompile(`\n{3,}`)
 func formatComments(lines []string) string {
 	var b strings.Builder
 	for _, line := range lines {
-		b.WriteString(strings.Trim(line, " \t\n"))
+		b.WriteString(strings.TrimSpace(line))
 		if strings.HasSuffix(line, "\n") {
 			b.WriteByte('\n')
 		}

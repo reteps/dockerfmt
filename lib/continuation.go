@@ -94,7 +94,7 @@ func scanContinuations(raw string, escape rune) []continuationLine {
 			if trimmed := strings.TrimLeftFunc(text, unicode.IsSpace); trimmed == "" || trimmed[0] == '#' {
 				// BuildKit drops comment and blank lines inside a continuation.
 				cl.start = startDropped
-				cl.keep = len(strings.TrimRight(text, " \t"))
+				cl.keep = len(strings.TrimRightFunc(text, unicode.IsSpace))
 				if trimmed == "" {
 					cl.keep = 0
 				}

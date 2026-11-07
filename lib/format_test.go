@@ -542,51 +542,62 @@ func TestIgnoreDirective(t *testing.T) {
 }
 
 // firstRunNode parses input and returns the node for its first RUN.
-func firstRunNode(t *testing.T, input string) *node {
+func firstNonFromNode(t *testing.T, input string) *node {
 	t.Helper()
 	lines := strings.SplitAfter(input, "\n")
 	result, err := parser.Parse(strings.NewReader(input))
 	require.NoError(t, err)
 	root := newNode(result.AST, lines)
 	for _, child := range root.children {
-		if child.keyword() == "RUN" {
+		if child.keyword() != "FROM" {
 			return child
 		}
 	}
-	t.Fatal("no RUN directive")
+	t.Fatal("no instruction after FROM")
 	return nil
 }
 
-func TestScanFlags(t *testing.T) {
+func TestScanFlagsRegion(t *testing.T) {
 	f := func(s string) flagItem { return flagItem{s, flagItemFlag} }
 	c := func(s string) flagItem { return flagItem{s, flagItemComment} }
 	sep := flagItem{"\\", flagItemSeparator}
 
 	tests := []struct {
-		name   string
-		input  string
-		want   []flagItem
-		wantOK bool
+		name        string
+		input       string
+		want        []flagItem
+		wantContent string
+		wantEnd     bool
+		wantOK      bool
 	}{
-		{"no flags", "FROM a\nRUN \\\n  \\\n  echo\n", nil, false},
+		{"no flags", "FROM a\nRUN \\\n  \\\n  echo\n", nil, "\\\n  \\\n  echo\n", false, true},
 		{"flags on one line", "FROM a\nRUN --network=host --mount=type=cache,target=/a echo\n",
-			[]flagItem{f("--network=host"), f("--mount=type=cache,target=/a")}, true},
+			[]flagItem{f("--network=host"), f("--mount=type=cache,target=/a")}, "echo\n", false, true},
+		{"quoted value keeps its quotes", "FROM a\nCOPY --chown=\"my user\" a b\n",
+			[]flagItem{f("--chown=\"my user\"")}, "a b\n", false, true},
+		{"end of flags", "FROM a\nRUN --network=host -- --x\n",
+			[]flagItem{f("--network=host")}, "--x\n", true, true},
 		{"leading continuation is not a separator", "FROM a\nRUN \\\n  --network=host \\\n  echo\n",
-			[]flagItem{f("--network=host")}, true},
+			[]flagItem{f("--network=host")}, "echo\n", false, true},
 		{"separator after last flag", "FROM a\nRUN --network=host \\\n  \\\n  echo\n",
-			[]flagItem{f("--network=host"), sep}, true},
+			[]flagItem{f("--network=host"), sep}, "echo\n", false, true},
 		{"comment before first flag", "FROM a\nRUN \\\n  # why \\\n  --network=host \\\n  echo\n",
-			[]flagItem{c("# why \\"), f("--network=host")}, true},
+			[]flagItem{c("# why \\"), f("--network=host")}, "echo\n", false, true},
 		{"comment and separator between flags", "FROM a\nRUN --mount=type=cache,target=/a \\\n  # c\n  \\\n  --network=host \\\n  echo\n",
-			[]flagItem{f("--mount=type=cache,target=/a"), c("# c"), sep, f("--network=host")}, true},
+			[]flagItem{f("--mount=type=cache,target=/a"), c("# c"), sep, f("--network=host")}, "echo\n", false, true},
 		{"comment after last flag belongs to content", "FROM a\nRUN --network=host \\\n  # c\n  echo\n",
-			[]flagItem{f("--network=host")}, true},
+			[]flagItem{f("--network=host")}, "# c\n  echo\n", false, true},
+		{"flag glued to the next line", "FROM a\nRUN --network=ho\\\nst echo\n", nil, "", false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := scanFlags(firstRunNode(t, tt.input))
+			got, ok := scanFlagsRegion(firstNonFromNode(t, tt.input))
 			assert.Equal(t, tt.wantOK, ok)
-			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.want, got.items)
+			assert.Equal(t, tt.wantEnd, got.endOfFlags)
+			if tt.wantOK {
+				assert.Equal(t, tt.wantContent, got.content)
+			}
 		})
 	}
 }
@@ -613,4 +624,52 @@ func TestIsEmptyContinuation(t *testing.T) {
 			assert.Equal(t, tt.want, isEmptyContinuation(tt.lines, tt.i))
 		})
 	}
+}
+
+// Inputs the fuzzer or bug hunts found mishandled.
+func TestRegressions(t *testing.T) {
+	tests := []struct {
+		name, input, want string
+	}{
+		{"quoted flag value keeps its quotes", "FROM a\nCOPY --chown=\"my user\"  a b\n",
+			"FROM a\nCOPY --chown=\"my user\" a b\n"},
+		{"quoted mount target", "FROM a\nRUN --mount=type=cache,target=\"/x y\"   echo hi\n",
+			"FROM a\nRUN --mount=type=cache,target=\"/x y\" \\\n    echo hi\n"},
+		{"comment among COPY arguments is kept", "FROM a\nCOPY --chown=me \\\n  # why\n  a b\n",
+			"FROM a\nCOPY --chown=me \\\n  # why\n  a b\n"},
+		{"end of flags without flags", "FROM a\nCOPY -- foo /tmp/\n", "FROM a\nCOPY -- foo /tmp/\n"},
+		{"end of flags before JSON", "FROM a\nCMD --doit=true -- [ \"a\" ]\n", "FROM a\nCMD --doit=true -- [\"a\"]\n"},
+		{"empty body", "FROM a\nRUN\n0\n", "FROM a\nRUN\n0\n"},
+		{"separator after the directive line", "FROM a\nRUN \\\n\\\n echo hi\n",
+			"FROM a\nRUN \\\n    \\\n    echo hi\n"},
+		{"trailing comment is not indented", "FROM a\nRUN echo a \\\n#\n", "FROM a\nRUN echo a \\\n#\n"},
+		{"shell comment running into the next line", "FROM a\nRUN echo a&#\\\necho b\\\n#\n echo c\n",
+			"FROM a\nRUN echo a&#\\\necho b\\\n#\n echo c\n"},
+		{"dangling escape", "FROM a\nRUN  echo a\\\\\\\necho b\n", "FROM a\nRUN  echo a\\\\\\\necho b\n"},
+		{"vertical tab inside a word", "FROM a\nRUN  echo a\vb\n", "FROM a\nRUN  echo a\vb\n"},
+		{"stray carriage returns", "FROM a\r\r\nRUN  echo a\r", "FROM a\r\nRUN echo a\r\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &Config{IndentSize: 4, TrailingNewline: true}
+			out := mustFormat(t, tt.input, c)
+			assert.Equal(t, tt.want, out)
+			assert.Equal(t, out, mustFormat(t, out, c), "idempotent")
+		})
+	}
+}
+
+func TestZeroIndentSizeMeansDefault(t *testing.T) {
+	out := mustFormat(t, "FROM a\nRUN a \\\n && b\n", &Config{})
+	assert.Equal(t, "FROM a\nRUN a \\\n    && b", out)
+}
+
+func TestMixedLineEndingsThatMatterAreKept(t *testing.T) {
+	// The heredoc body would get the file's dominant "\r\n" line endings,
+	// which BuildKit keeps in the script.
+	input := "FROM a\r\nRUN  echo a\r\nRUN  echo b\r\nRUN <<EOF\necho x\nEOF\n"
+	var fallbacks []int
+	c := &Config{IndentSize: 4, OnFallback: func(line int, _ string) { fallbacks = append(fallbacks, line) }}
+	assert.Equal(t, input, mustFormat(t, input, c))
+	assert.Equal(t, []int{4}, fallbacks)
 }
