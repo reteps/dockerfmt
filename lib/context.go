@@ -77,7 +77,7 @@ func hasShellShebang(body string) bool {
 // whole command, so the shell runs its body as a script. A heredoc fed to
 // another program ("RUN python3 <<EOF", "RUN <<EOF python3") is data.
 func isShellScriptHeredoc(n *parser.Node, ctx instrContext) bool {
-	if !ctx.posixShell || strings.ToUpper(n.Value) != "RUN" || len(n.Heredocs) != 1 || n.Next == nil {
+	if !ctx.posixShell || !strings.EqualFold(n.Value, "RUN") || len(n.Heredocs) != 1 || n.Next == nil {
 		return false
 	}
 	cmd := strings.TrimSpace(n.Next.Value)

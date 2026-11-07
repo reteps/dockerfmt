@@ -1,11 +1,9 @@
-// WASM entry point for the JS bindings. Built with standard Go (GOOS=js
-// GOARCH=wasm), not TinyGo. TinyGo produces smaller binaries but has a
-// blocking bug:
-//   - reflect.AssignableTo panics with interfaces, breaking encoding/json
-//     used by the moby/buildkit parser (https://github.com/tinygo-org/tinygo/issues/4277)
-
 //go:build js && wasm
 
+// Command format is the WebAssembly module behind the JS bindings. It is
+// built with the standard Go toolchain: TinyGo's reflect.AssignableTo panics
+// on interfaces, which breaks the encoding/json use in BuildKit's parser
+// (https://github.com/tinygo-org/tinygo/issues/4277).
 package main
 
 import (
@@ -14,20 +12,16 @@ import (
 	"github.com/reteps/dockerfmt/lib"
 )
 
-// formatBytes returns the formatted Dockerfile as a string, or a JS Error if
-// it can't be formatted (format.ts throws it).
+// formatBytes is called from format.ts as (contents, indent, trailingNewline,
+// spaceRedirects). It returns the formatted Dockerfile, or a JS Error that
+// format.ts throws.
 func formatBytes(_ js.Value, args []js.Value) any {
-	contents := args[0].String()
-	indentSize := uint(args[1].Int())
-	newlineFlag := args[2].Bool()
-	spaceRedirects := args[3].Bool()
-
 	c := &lib.Config{
-		IndentSize:      indentSize,
-		TrailingNewline: newlineFlag,
-		SpaceRedirects:  spaceRedirects,
+		IndentSize:      uint(args[1].Int()),
+		TrailingNewline: args[2].Bool(),
+		SpaceRedirects:  args[3].Bool(),
 	}
-	out, err := lib.Format(contents, c)
+	out, err := lib.Format(args[0].String(), c)
 	if err != nil {
 		return js.Global().Get("Error").New(err.Error())
 	}
@@ -36,6 +30,5 @@ func formatBytes(_ js.Value, args []js.Value) any {
 
 func main() {
 	js.Global().Set("__dockerfmt_formatBytes", js.FuncOf(formatBytes))
-	// Block forever to keep the Go runtime alive for subsequent calls.
-	select {}
+	select {} // keep the Go runtime alive for later calls
 }

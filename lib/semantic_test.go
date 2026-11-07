@@ -109,7 +109,7 @@ func TestFallbackLeavesInstructionAsWritten(t *testing.T) {
 	formatters["stopsignal"] = func(*node, *Config) string { panic("boom") }
 
 	var reasons []string
-	c := &Config{IndentSize: 4, TrailingNewline: true, OnFallback: func(line int, reason string) {
+	c := &Config{IndentSize: 4, TrailingNewline: true, OnFallback: func(_ int, reason string) {
 		reasons = append(reasons, reason)
 	}}
 	out := mustFormat(t, "FROM a\nSTOPSIGNAL   SIGTERM\nrun   echo  hi\n", c)

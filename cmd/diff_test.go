@@ -14,12 +14,9 @@ import (
 // printed and whether the input was already formatted.
 func captureProcessInput(t *testing.T, name, input string, trailingNewline bool) (string, bool) {
 	t.Helper()
-	oldCheck, oldDiff := checkFlag, diffFlag
-	t.Cleanup(func() { checkFlag, diffFlag = oldCheck, oldDiff })
-	checkFlag, diffFlag = true, true
-
 	var out bytes.Buffer
-	formatted, err := processInput(name, []byte(input), &lib.Config{IndentSize: 4, TrailingNewline: trailingNewline}, &out, io.Discard)
+	c := lib.Config{IndentSize: 4, TrailingNewline: trailingNewline}
+	formatted, err := processInput(name, []byte(input), c, &options{diff: true}, &out, io.Discard)
 	require.NoError(t, err)
 	return out.String(), formatted
 }
@@ -84,8 +81,8 @@ func TestDiffOutput(t *testing.T) {
 	}
 }
 
-func TestSplitLines(t *testing.T) {
-	assert.Nil(t, splitLines(""))
-	assert.Equal(t, []string{"a\n", "b\n"}, splitLines("a\nb\n"))
-	assert.Equal(t, []string{"a\n", "b" + noNewline + "\n"}, splitLines("a\nb"))
+func TestDiffLines(t *testing.T) {
+	assert.Nil(t, diffLines(""))
+	assert.Equal(t, []string{"a\n", "b\n"}, diffLines("a\nb\n"))
+	assert.Equal(t, []string{"a\n", "b" + noNewline + "\n"}, diffLines("a\nb"))
 }

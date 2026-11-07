@@ -11,31 +11,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// runCLI runs the root command's logic with the given flag values and args
-// and returns the exit status and what was written to stdout and stderr.
+// runCLI runs dockerfmt -n with the given mode flags and args, and returns
+// the exit status and what was written to stdout and stderr.
 func runCLI(t *testing.T, stdin string, write, check, diff bool, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
-	old := []bool{writeFlag, checkFlag, diffFlag, newlineFlag}
-	t.Cleanup(func() {
-		writeFlag, checkFlag, diffFlag, newlineFlag = old[0], old[1], old[2], old[3]
-		rootCmd.SetIn(nil)
-		rootCmd.SetOut(nil)
-		rootCmd.SetErr(nil)
-	})
-	writeFlag, checkFlag, diffFlag, newlineFlag = write, check, diff, true
-
+	flags := []string{"-n"}
+	for flag, set := range map[string]bool{"-w": write, "-c": check, "-d": diff} {
+		if set {
+			flags = append(flags, flag)
+		}
+	}
 	var out, errOut bytes.Buffer
-	rootCmd.SetIn(strings.NewReader(stdin))
-	rootCmd.SetOut(&out)
-	rootCmd.SetErr(&errOut)
-	code = run(rootCmd, args)
+	code = execute(append(flags, args...), strings.NewReader(stdin), &out, &errOut)
 	return code, out.String(), errOut.String()
 }
 
 func writeTemp(t *testing.T, name, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
-	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 	return path
 }
 

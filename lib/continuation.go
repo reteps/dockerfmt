@@ -126,14 +126,13 @@ func scanContinuations(raw string, escape rune) []continuationLine {
 			switch {
 			case escaped:
 				escaped = false
+			case quote == 0 && unicode.IsSpace(ch):
+				sep = true
+			case quote == 0 && (ch == '\'' || ch == '"'):
+				quote = ch
+			case quote == 0 && ch == escape:
+				escaped = true
 			case quote == 0:
-				if unicode.IsSpace(ch) {
-					sep = true
-				} else if ch == '\'' || ch == '"' {
-					quote = ch
-				} else if ch == escape {
-					escaped = true
-				}
 			case ch == quote:
 				quote = 0
 			case ch == escape && quote != '\'':

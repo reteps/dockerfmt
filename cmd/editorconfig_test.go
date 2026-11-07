@@ -6,21 +6,19 @@ import (
 	"testing"
 
 	"github.com/reteps/dockerfmt/lib"
-	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// newFlagCmd returns a command with the same formatting flags as rootCmd, so
-// tests can control which flags count as explicitly set.
-func newFlagCmd(t *testing.T, args ...string) *cobra.Command {
+// parsedFlags returns the root command's flags after parsing args, so tests
+// control which flags count as explicitly set.
+func parsedFlags(t *testing.T, args ...string) *pflag.FlagSet {
 	t.Helper()
-	c := &cobra.Command{}
-	c.Flags().BoolP("newline", "n", false, "")
-	c.Flags().UintP("indent", "i", 4, "")
-	c.Flags().BoolP("space-redirects", "s", false, "")
-	require.NoError(t, c.Flags().Parse(args))
-	return c
+	var status int
+	flags := newRootCmd(&status).Flags()
+	require.NoError(t, flags.Parse(args))
+	return flags
 }
 
 // writeProject lays out:
@@ -44,7 +42,7 @@ func writeProject(t *testing.T, editorconfig string) {
 
 func TestEditorConfigAppliesToSubdirectories(t *testing.T) {
 	writeProject(t, "root = true\n\n[Dockerfile]\nindent_size = 2\ninsert_final_newline = true\nspace_redirects = true\n")
-	base := &lib.Config{IndentSize: 4}
+	base := lib.Config{IndentSize: 4}
 
 	for _, path := range []string{
 		"Dockerfile",
@@ -54,7 +52,7 @@ func TestEditorConfigAppliesToSubdirectories(t *testing.T) {
 		filepath.Join("docker", "..", "docker", "Dockerfile"),
 	} {
 		t.Run(path, func(t *testing.T) {
-			got := applyEditorConfig(base, path, newFlagCmd(t))
+			got := applyEditorConfig(base, path, parsedFlags(t))
 			assert.Equal(t, uint(2), got.IndentSize)
 			assert.True(t, got.TrailingNewline)
 			assert.True(t, got.SpaceRedirects)
@@ -64,7 +62,7 @@ func TestEditorConfigAppliesToSubdirectories(t *testing.T) {
 	t.Run("absolute path", func(t *testing.T) {
 		abs, err := filepath.Abs("docker/Dockerfile")
 		require.NoError(t, err)
-		got := applyEditorConfig(base, abs, newFlagCmd(t))
+		got := applyEditorConfig(base, abs, parsedFlags(t))
 		assert.Equal(t, uint(2), got.IndentSize)
 	})
 }
@@ -73,7 +71,7 @@ func TestEditorConfigPathGlobs(t *testing.T) {
 	for _, section := range []string{"docker/Dockerfile", "**/Dockerfile", "docker/**", "{Dockerfile,*.dockerfile}"} {
 		t.Run(section, func(t *testing.T) {
 			writeProject(t, "root = true\n\n["+section+"]\nindent_size = 2\n")
-			got := applyEditorConfig(&lib.Config{IndentSize: 4}, "docker/Dockerfile", newFlagCmd(t))
+			got := applyEditorConfig(lib.Config{IndentSize: 4}, "docker/Dockerfile", parsedFlags(t))
 			assert.Equal(t, uint(2), got.IndentSize)
 		})
 	}
@@ -81,9 +79,9 @@ func TestEditorConfigPathGlobs(t *testing.T) {
 
 func TestEditorConfigExplicitFlagsWin(t *testing.T) {
 	writeProject(t, "root = true\n\n[Dockerfile]\nindent_size = 2\ninsert_final_newline = false\n")
-	base := &lib.Config{IndentSize: 8, TrailingNewline: true}
+	base := lib.Config{IndentSize: 8, TrailingNewline: true}
 
-	got := applyEditorConfig(base, "docker/Dockerfile", newFlagCmd(t, "--indent=8", "--newline"))
+	got := applyEditorConfig(base, "docker/Dockerfile", parsedFlags(t, "--indent=8", "--newline"))
 	assert.Equal(t, uint(8), got.IndentSize)
 	assert.True(t, got.TrailingNewline)
 }
