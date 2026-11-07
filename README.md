@@ -145,7 +145,9 @@ dockerfmt reads [EditorConfig](https://editorconfig.org/) files to pick up proje
 | `insert_final_newline`   | `--newline`          | Standard EditorConfig key   |
 | `space_redirects`        | `--space-redirects`  | Custom key (non-standard)   |
 
-CLI flags always take precedence over EditorConfig values.
+`.editorconfig` files are looked up from each Dockerfile's own directory upward (stopping at `root = true`), as the EditorConfig spec describes, so a repository-root `.editorconfig` also applies to Dockerfiles in subdirectories such as `docker/Dockerfile`.
+
+CLI flags always take precedence over EditorConfig values (this includes flags set in a pre-commit hook's `args`; see [Pre-commit](#pre-commit)).
 
 Example `.editorconfig`:
 
@@ -188,11 +190,9 @@ repos:
     rev: main  # run `pre-commit autoupdate` to pin a version
     hooks:
       - id: dockerfmt
-        args:
-          - --indent=4
-          - --newline
-          - --write
 ```
+
+The hook runs `dockerfmt --write --newline --space-redirects` by default. Setting `args` replaces those defaults, and like any CLI flag, flags passed in `args` take precedence over `.editorconfig`. To let `.editorconfig` control a setting (e.g. `indent_size`), leave the corresponding flag out of `args`.
 
 ## Limitations
 
