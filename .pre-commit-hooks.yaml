@@ -9,12 +9,10 @@
     - --space-redirects
   description: Format Dockerfile files
   entry: dockerfmt
-  files: ^.*(Container|Docker)file.*$
+  files: (?i)(^|/)[^/]*(container|docker)file[^/]*$
   id: dockerfmt
   language: golang
   name: dockerfmt
   pass_filenames: true
   require_serial: false
-  exclude: ".dockerignore$"
-  types_or:
-    - dockerfile
+  exclude: (?i)\.dockerignore$
