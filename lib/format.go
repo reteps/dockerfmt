@@ -809,8 +809,9 @@ func formatMaintainer(n *ExtendedNode, c *Config) string {
 		maintainer = maintainer[1 : len(maintainer)-1]
 	}
 	// MAINTAINER takes the raw rest of the line, so escape what would
-	// break the double-quoted LABEL value.
-	maintainer = strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(maintainer)
+	// break the double-quoted LABEL value. LABEL also expands variables while
+	// MAINTAINER does not, so "$" must be escaped too.
+	maintainer = strings.NewReplacer(`\`, `\\`, `"`, `\"`, `$`, `\$`).Replace(maintainer)
 	return "LABEL org.opencontainers.image.authors=\"" + maintainer + "\"\n"
 }
 

@@ -402,6 +402,11 @@ func TestPerDirective(t *testing.T) {
 			"FROM alpine\nLABEL org.opencontainers.image.authors=\"a\\\\\\\\b\"\n",
 		},
 		{
+			"MAINTAINER with variable is not expanded by LABEL",
+			"FROM alpine\nMAINTAINER $USER\n",
+			"FROM alpine\nLABEL org.opencontainers.image.authors=\"\\$USER\"\n",
+		},
+		{
 			"MAINTAINER with email in angle brackets",
 			"FROM alpine\nMAINTAINER Jane Doe <jane@example.com>\n",
 			"FROM alpine\nLABEL org.opencontainers.image.authors=\"Jane Doe <jane@example.com>\"\n",
