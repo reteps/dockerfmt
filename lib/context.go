@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/moby/buildkit/frontend/dockerfile/parser"
+	"github.com/moby/buildkit/frontend/dockerfile/shell"
 )
 
 // instrContext is the file-level state an instruction is interpreted in.
@@ -22,6 +23,11 @@ type instrContext struct {
 	// stageShells records, for each named stage so far, whether it ended
 	// with a POSIX shell. A stage built on another inherits its shell.
 	stageShells map[string]bool
+	// inStage reports that a FROM has been seen.
+	inStage bool
+	// globalArgs are the defaults of the ARGs before the first FROM, which
+	// FROM can use.
+	globalArgs map[string]string
 }
 
 func defaultContext() instrContext {
@@ -39,6 +45,10 @@ func (ctx *instrContext) update(n *parser.Node) {
 	switch strings.ToUpper(n.Value) {
 	case "FROM":
 		ctx.startStage(n)
+	case "ARG":
+		if !ctx.inStage {
+			ctx.addGlobalArgs(n)
+		}
 	case "SHELL":
 		if n.Next != nil {
 			ctx.posixShell = isPOSIXShell(n.Next.Value)
@@ -50,11 +60,11 @@ func (ctx *instrContext) update(n *parser.Node) {
 }
 
 func (ctx *instrContext) startStage(from *parser.Node) {
-	ctx.posixShell, ctx.stage = true, ""
+	ctx.posixShell, ctx.stage, ctx.inStage = true, "", true
 	if from.Next == nil {
 		return
 	}
-	base := strings.ToLower(from.Next.Value)
+	base := strings.ToLower(ctx.expandGlobalArgs(from.Next.Value))
 	if posix, ok := ctx.stageShells[base]; ok {
 		ctx.posixShell = posix
 	} else if isWindowsImage(base, from.Flags) {
@@ -67,6 +77,47 @@ func (ctx *instrContext) startStage(from *parser.Node) {
 			ctx.stageShells = make(map[string]bool)
 		}
 	}
+}
+
+func (ctx *instrContext) addGlobalArgs(arg *parser.Node) {
+	if ctx.globalArgs == nil {
+		ctx.globalArgs = make(map[string]string)
+	}
+	for a := arg.Next; a != nil; a = a.Next {
+		name, value, ok := strings.Cut(a.Value, "=")
+		if !ok {
+			continue // no default
+		}
+		if v, err := shell.NewLex(ctx.escape).ProcessWordWithMatches(value, globalArgs(ctx.globalArgs)); err == nil {
+			value = v.Result
+		}
+		ctx.globalArgs[name] = value
+	}
+}
+
+// expandGlobalArgs expands the variables in a FROM's image name with the
+// defaults of the global ARGs, as BuildKit does without build arguments. If
+// that fails, word is returned as is.
+func (ctx *instrContext) expandGlobalArgs(word string) string {
+	if !strings.Contains(word, "$") {
+		return word
+	}
+	r, err := shell.NewLex(ctx.escape).ProcessWordWithMatches(word, globalArgs(ctx.globalArgs))
+	if err != nil {
+		return word
+	}
+	return r.Result
+}
+
+type globalArgs map[string]string
+
+func (g globalArgs) Get(k string) (string, bool) { v, ok := g[k]; return v, ok }
+func (g globalArgs) Keys() []string {
+	keys := make([]string, 0, len(g))
+	for k := range g {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // isWindowsImage reports whether a FROM with the lower-case image name base

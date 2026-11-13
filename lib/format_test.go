@@ -163,7 +163,7 @@ func TestFormatShell(t *testing.T) {
 			if tt.hereDoc {
 				result = formatScript(tt.content, tt.config, false)
 			} else {
-				result = formatShellBody(tt.content, tt.config)
+				result, _ = formatShellBody(tt.content, tt.config)
 			}
 			assert.Equal(t, tt.expected, result)
 		})

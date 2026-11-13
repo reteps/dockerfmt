@@ -63,11 +63,12 @@ func TestFormatShellBodyCommentPlacement(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := formatShellBody(tt.in, defaultConfig)
+			got, _ := formatShellBody(tt.in, defaultConfig)
 			assert.Equal(t, tt.want, got)
 			// Idempotent.
 			if got != tt.in {
-				assert.Equal(t, got, formatShellBody(got, defaultConfig))
+				again, _ := formatShellBody(got, defaultConfig)
+				assert.Equal(t, got, again)
 			}
 		})
 	}

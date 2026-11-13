@@ -476,3 +476,17 @@ ENV M=--opt="a b"
 ENV V="$HOME/x  y"
 ENV DEPS="curl \
     git"
+-- legacy value with comments --
+FROM a
+ENV GPG_KEYS \
+# Eric
+	CEC86BB4A0BA9D0F \
+# Sylvain
+	5AED1BF378E9A19D
+-- want --
+FROM a
+ENV GPG_KEYS \
+# Eric
+	CEC86BB4A0BA9D0F \
+# Sylvain
+	5AED1BF378E9A19D

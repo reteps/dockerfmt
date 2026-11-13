@@ -103,3 +103,13 @@ ADD --keep-git-dir ./ /data/src
 RUN --mount=type=bind,source=requirements.lock,target=requirements.lock \
     --mount=type=ssh \
     pip install -r requirements.lock
+-- JSON paths with backslashes --
+FROM a
+COPY ["C:\\foo", "D:\\"]
+COPY --from=x ["\\PowerShell\\", "$ProgramFiles\\PowerShell"]
+COPY ["src", "/dst/"]
+-- want --
+FROM a
+COPY ["C:\\foo", "D:\\"]
+COPY --from=x ["\\PowerShell\\", "$ProgramFiles\\PowerShell"]
+COPY src /dst/

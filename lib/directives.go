@@ -75,7 +75,13 @@ func formatRun(n *node, c *Config) string {
 	default:
 		content = region.content
 		if ctx.formatsShell() {
-			content = formatShellBody(content, c)
+			var formatted bool
+			content, formatted = formatShellBody(content, c)
+			if !formatted && n.multiline() && len(region.items) > 0 {
+				// Laying out the flags would re-indent the body's first
+				// line and none of the others.
+				return n.source
+			}
 		}
 	}
 
@@ -104,9 +110,14 @@ func formatCmd(n *node, c *Config) string {
 		return bareInstruction(n.keyword(), region.flags())
 	}
 	if n.context().formatsShell() {
-		content = formatShellBody(content, c)
+		content, _ = formatShellBody(content, c)
 	}
 	return n.keyword() + " " + withFlags(region.flags(), content, c, n.context().escape)
+}
+
+func shellBodyOrAsWritten(body string, c *Config) string {
+	out, _ := formatShellBody(body, c)
+	return out
 }
 
 // bareInstruction formats an instruction that has no arguments after its
@@ -123,8 +134,9 @@ func formatKeyValues(n *node, c *Config) string {
 	}
 	// BuildKit parses the legacy form into a key/value pair whose third
 	// node, the delimiter, is empty.
-	if n.next.next != nil && n.next.next.next != nil && n.next.next.next.Value == "" && !n.hasCommentLines() {
-		if out, ok := formatLegacyKeyValue(n); ok {
+	if n.next.next != nil && n.next.next.next != nil && n.next.next.next.Value == "" {
+		// In the legacy form, whitespace in the value is part of it.
+		if out, ok := formatLegacyKeyValue(n); ok && !n.hasCommentLines() {
 			return out
 		}
 		return n.source
@@ -235,7 +247,7 @@ func formatHealthcheck(n *node, c *Config) string {
 	case n.Attributes["json"]:
 		content = "CMD " + marshalJSONStringArray(n.args()[1:]) + "\n"
 	case n.context().formatsShell():
-		content = "CMD " + trimLeadingContinuation(formatShellBody(body, c), n.context().escape)
+		content = "CMD " + trimLeadingContinuation(shellBodyOrAsWritten(body, c), n.context().escape)
 	default:
 		content = "CMD " + body
 	}
@@ -337,10 +349,12 @@ func lowerExposeProtocol(port string) string {
 
 // safeAsWords reports whether JSON-form arguments can be written in the
 // space-separated form, which BuildKit splits on whitespace: none may be empty
-// or contain whitespace.
+// or contain whitespace. Arguments with backslashes, such as Windows paths,
+// keep the JSON form too: as words, a backslash could escape what follows, or
+// be the escape character.
 func safeAsWords(args []string) bool {
 	for _, a := range args {
-		if a == "" || strings.ContainsAny(a, " \t\n\r\v\f") {
+		if a == "" || strings.ContainsAny(a, " \t\n\r\v\f\\`") {
 			return false
 		}
 	}

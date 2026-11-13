@@ -75,22 +75,21 @@ func indentWidth(line string) int {
 
 // formatShellBody formats the shell-form body of a RUN, CMD or ENTRYPOINT.
 // content is the text after the directive keyword and any flags; its first
-// line is the rest of the directive line. The result ends in a newline when
-// formatting succeeded; otherwise content is returned unchanged.
-func formatShellBody(content string, c *Config) string {
+// line is the rest of the directive line. The formatted result ends in a
+// newline. ok is false, and content is returned unchanged, if it can't be
+// formatted.
+func formatShellBody(content string, c *Config) (out string, ok bool) {
 	body, ok := splitShellBody(content)
 	if !ok {
-		return content
+		return content, false
 	}
-	out, ok := printShell(body.src, c)
-	if !ok {
-		return content
+	if out, ok = printShell(body.src, c); !ok {
+		return content, false
 	}
-	out, ok = reinsertLines(body, out, c)
-	if !ok {
-		return content
+	if out, ok = reinsertLines(body, out, c); !ok {
+		return content, false
 	}
-	return out
+	return out, true
 }
 
 // splitShellBody separates the code lines of content from its comment lines,

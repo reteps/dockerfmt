@@ -690,3 +690,13 @@ ENTRYPOINT ["nginx", "-g", "daemon off;"]
 # https://github.com/reteps/dockerfmt/issues/20
 FROM nginx
 ENTRYPOINT nginx -g 'daemon off;'
+-- body left as written after flag lines --
+FROM a
+RUN --mount=type=cache,target=/a \
+        x=`date`; \
+        echo $x
+-- want --
+FROM a
+RUN --mount=type=cache,target=/a \
+        x=`date`; \
+        echo $x

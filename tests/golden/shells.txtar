@@ -55,3 +55,11 @@ RUN echo hello   world> C:\out.txt
 -- want --
 FROM mcr.microsoft.com/windows/servercore:ltsc2022
 RUN echo hello   world> C:\out.txt
+-- Windows base image named by a global ARG --
+ARG BASE=mcr.microsoft.com/windows/servercore:ltsc2019
+FROM ${BASE}
+RUN powershell busybox.exe --list ^|%{$nul = cmd /c mklink C:\bin\$_.exe busybox.exe}
+-- want --
+ARG BASE=mcr.microsoft.com/windows/servercore:ltsc2019
+FROM ${BASE}
+RUN powershell busybox.exe --list ^|%{$nul = cmd /c mklink C:\bin\$_.exe busybox.exe}
