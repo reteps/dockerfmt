@@ -46,7 +46,7 @@ FROM a AS Base
 FROM base
 RUN  echo   x
 -- want --
-FROM a AS Base
+FROM a AS base
 FROM base
 RUN echo x
 -- Windows base image --

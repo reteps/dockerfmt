@@ -146,10 +146,11 @@ func semanticKeyIn(n *parser.Node, ctx instrContext, env fakeEnv) (string, error
 
 	switch c := v.(type) {
 	case *instructions.Stage:
-		return fmt.Sprintf("FROM %q AS %q PLATFORM %q", c.BaseName, c.Name, c.Platform), nil
+		// The formatter lowers a base that names an earlier stage, which
+		// BuildKit then finds (see stageRef).
+		return fmt.Sprintf("FROM %q AS %q PLATFORM %q", ctx.stageRef(c.BaseName), c.Name, c.Platform), nil
 	case *instructions.MaintainerCommand:
-		// formatMaintainer rewrites MAINTAINER as this LABEL, a deliberate
-		// change the key accepts. It shares unwrapMaintainerQuotes with the
+		// formatMaintainer rewrites MAINTAINER as this LABEL. It shares unwrapMaintainerQuotes with the
 		// formatter, so it can't catch a bug there; the tests do.
 		return labelKey([]string{maintainerLabel + "=" + unwrapMaintainerQuotes(c.Maintainer)}), nil
 	case *instructions.LabelCommand:
@@ -187,6 +188,9 @@ func semanticKeyIn(n *parser.Node, ctx instrContext, env fakeEnv) (string, error
 		}
 	}
 	switch c := v.(type) {
+	case *instructions.CopyCommand:
+		// BuildKit finds the stage ignoring case.
+		c.From = ctx.stageRef(c.From)
 	case *instructions.ExposeCommand:
 		// BuildKit lowers the protocol when it sets the exposed ports.
 		for i, p := range c.Ports {
@@ -205,7 +209,12 @@ func semanticKeyIn(n *parser.Node, ctx instrContext, env fakeEnv) (string, error
 			c.Files[0].Data = canonicalShell(c.Files[0].Data)
 		}
 		// The order of flags can matter (overlapping mounts), so it is kept.
-		return fmt.Sprintf("RUN flags=%q %s", n.Flags, mustJSON(c)), nil
+		// BuildKit finds a mount's stage ignoring case.
+		flags := make([]string, len(n.Flags))
+		for i, f := range n.Flags {
+			flags[i] = ctx.lowerStageRefs(f)
+		}
+		return fmt.Sprintf("RUN flags=%q %s", flags, mustJSON(c)), nil
 	case *instructions.CmdCommand:
 		canonCmdLine(&c.ShellDependantCmdLine)
 	case *instructions.EntrypointCommand:

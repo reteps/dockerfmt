@@ -135,7 +135,7 @@ func scanFlagLines(n *node) (r flagsRegion, ok bool) {
 				// Not a flag, or a flag joined to the next line's first word.
 				return flagsRegion{}, false
 			}
-			r.items = append(r.items, flagItem{word, flagItemFlag})
+			r.items = append(r.items, flagItem{n.context().lowerStageRefs(word), flagItemFlag})
 			read++
 			pos = end
 		}

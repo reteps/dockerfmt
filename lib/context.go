@@ -190,3 +190,36 @@ func isShellScriptHeredoc(n *parser.Node, ctx instrContext) bool {
 	}
 	return strings.HasPrefix(cmd, "<<") && hasShellShebang(n.Heredocs[0].Content)
 }
+
+// stageRef returns name in lower case if it names a stage defined before this
+// point. BuildKit stores stage names in lower case and finds the stage of a
+// COPY --from or RUN --mount from= ignoring case. FROM looks the name up as
+// written, so "FROM Builder" only builds on stage "builder" once lowered.
+// Anything else, such as an image name, is returned as is.
+func (ctx instrContext) stageRef(name string) string {
+	lower := strings.ToLower(name)
+	if _, ok := ctx.stageShells[lower]; ok {
+		return lower
+	}
+	return name
+}
+
+// lowerStageRefs lowers the stage name in a --from or --mount flag, as
+// written in the source or as parsed. A --mount value with quotes is left
+// alone: BuildKit reads it as CSV.
+func (ctx instrContext) lowerStageRefs(flag string) string {
+	if v, ok := strings.CutPrefix(flag, "--from="); ok {
+		return "--from=" + ctx.stageRef(v)
+	}
+	v, ok := strings.CutPrefix(flag, "--mount=")
+	if !ok || strings.ContainsAny(v, `"'`) {
+		return flag
+	}
+	fields := strings.Split(v, ",")
+	for i, f := range fields {
+		if k, val, ok := strings.Cut(f, "="); ok && strings.EqualFold(k, "from") {
+			fields[i] = k + "=" + ctx.stageRef(val)
+		}
+	}
+	return "--mount=" + strings.Join(fields, ",")
+}

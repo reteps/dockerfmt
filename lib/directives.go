@@ -1,6 +1,7 @@
 package lib
 
 import (
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -24,7 +25,7 @@ func init() {
 		command.Entrypoint:  formatCmd,
 		command.Env:         formatKeyValues,
 		command.Expose:      spaceSeparated(argsOnOwnLines, lowerExposeProtocols),
-		command.From:        spaceSeparated(singleLine, upperFromAs),
+		command.From:        spaceSeparated(singleLine, normalizeFrom),
 		command.Healthcheck: formatHealthcheck,
 		command.Label:       formatKeyValues,
 		command.Maintainer:  formatMaintainer,
@@ -291,7 +292,7 @@ const (
 // spaceSeparated returns a formatter for instructions whose arguments are
 // flags and space-separated words (COPY, ADD, EXPOSE, FROM, WORKDIR). If set,
 // normalize rewrites the words in place.
-func spaceSeparated(mode multilineMode, normalize func(words []string)) directiveFormatter {
+func spaceSeparated(mode multilineMode, normalize func(words []string, ctx instrContext)) directiveFormatter {
 	return func(n *node, c *Config) string {
 		region, ok := scanFlagsRegion(n)
 		if !ok || n.hasCommentLines() {
@@ -322,7 +323,7 @@ func spaceSeparated(mode multilineMode, normalize func(words []string)) directiv
 				args[i] = strings.Trim(a, " \t")
 			}
 			if normalize != nil {
-				normalize(args)
+				normalize(args, n.context())
 			}
 			content = strings.Join(args, sep)
 		}
@@ -334,18 +335,29 @@ func spaceSeparated(mode multilineMode, normalize func(words []string)) directiv
 	}
 }
 
-// upperFromAs writes the AS of "FROM image AS name" in the case of the FROM
+// normalizeFrom writes the AS of "FROM image AS name" in the case of the FROM
 // keyword, which the formatter writes in upper case (BuildKit's FromAsCasing
-// check).
-func upperFromAs(words []string) {
+// check), and the stage name in lower case, as BuildKit stores it (its
+// StageNameCasing check). A base image that names an earlier stage is lowered
+// too, which is what makes BuildKit find the stage.
+func normalizeFrom(words []string, ctx instrContext) {
+	if len(words) > 0 {
+		words[0] = ctx.stageRef(words[0])
+	}
 	if len(words) == 3 && strings.EqualFold(words[1], "AS") {
 		words[1] = "AS"
+		if reStageName.MatchString(words[2]) {
+			words[2] = strings.ToLower(words[2])
+		}
 	}
 }
 
+// reStageName matches the stage names BuildKit accepts, in any case.
+var reStageName = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_.-]*$`)
+
 // lowerExposeProtocols writes EXPOSE protocols in lower case, as BuildKit
 // reads them (its ExposeProtoCasing check).
-func lowerExposeProtocols(words []string) {
+func lowerExposeProtocols(words []string, _ instrContext) {
 	for i, w := range words {
 		words[i] = lowerExposeProtocol(w)
 	}

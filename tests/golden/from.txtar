@@ -19,3 +19,20 @@ FROM nginx:latest
 # FROM AS takes the case of FROM
 FROM a AS b
 FROM c AS d
+-- stage names are lower case, with the references to them --
+FROM golang AS Builder
+RUN --mount=type=cache,from=Builder,target=/x go build
+COPY --from=Builder /a /b
+FROM Builder AS Test
+# not stages: an image, and a name no stage has
+COPY --from=nginx:Latest /a /b
+COPY --from=Other /a /b
+-- want --
+FROM golang AS builder
+RUN --mount=type=cache,from=builder,target=/x \
+    go build
+COPY --from=builder /a /b
+FROM builder AS test
+# not stages: an image, and a name no stage has
+COPY --from=nginx:Latest /a /b
+COPY --from=Other /a /b
