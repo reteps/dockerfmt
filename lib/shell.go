@@ -95,6 +95,12 @@ func formatShellBody(content string, c *Config) string {
 // splitShellBody separates the code lines of content from its comment lines,
 // blank lines and empty continuation lines ("\" alone).
 func splitShellBody(content string) (shellBody, bool) {
+	// Blank lines at the end are inside the continuation, which BuildKit
+	// drops; keeping them would make the "\" line before them look like a
+	// separator rather than the end of the code. The last line gets a line
+	// ending, without which a final "\" would be a dangling escape rather than
+	// a continuation.
+	content = strings.TrimRightFunc(content, unicode.IsSpace) + "\n"
 	lines := strings.SplitAfter(content, "\n")
 	var src strings.Builder
 	var body shellBody

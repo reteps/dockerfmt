@@ -9,7 +9,7 @@ import (
 func TestSplitShellBody(t *testing.T) {
 	body, ok := splitShellBody("echo a \\\n  # one\n\n  \\\n  && echo b")
 	assert.True(t, ok)
-	assert.Equal(t, "echo a \\\n  && echo b", body.src)
+	assert.Equal(t, "echo a \\\n  && echo b\n", body.src)
 	start := len("echo a \\\n  ")
 	assert.Equal(t, []shellInsert{
 		{anchor: start, text: "# one"},

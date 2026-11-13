@@ -8,7 +8,7 @@
     "url": "https://github.com/reteps/dockerfmt.git",
     "directory": "js"
   },
-  "author": "Peter Stenger <pete@stenger.io>",
+  "author": "Peter Stenger <peter@stenger.io>",
   "license": "MIT",
   "engines": {
     "node": ">=20"
