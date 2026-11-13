@@ -75,7 +75,7 @@ func TestReindentContinuations(t *testing.T) {
 			"A=1 \\\n  # comment  \n        B=2\n", true,
 			"A=1 \\\n    # comment\n    B=2\n",
 		},
-		{"blank line emptied", "A=1 \\\n   \n  B=2\n", true, "A=1 \\\n\n    B=2\n"},
+		{"blank line removed", "A=1 \\\n   \n  B=2\n", true, "A=1 \\\n    B=2\n"},
 		{"word continued on next line kept", "A=foo\\\nbar\n", true, "A=foo\\\nbar\n"},
 		{"word separated by leading whitespace re-indented", "A=x\\ \\\n  B=2\n", true, "A=x\\ \\\n    B=2\n"},
 	}

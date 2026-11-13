@@ -70,6 +70,7 @@ RUN apt-get update \
 - Normalizes whitespace and extra blank lines across all directives
 - Converts legacy `ENV` syntax (`ENV key value` → `ENV key=value`)
 - Upgrades deprecated directives (`MAINTAINER` → `LABEL`)
+- Fixes what BuildKit's [build checks](https://docs.docker.com/reference/build-checks/) flag where that can't change the build: `AS` in the case of `FROM` (FromAsCasing), lower-case `EXPOSE` protocols (ExposeProtoCasing), no blank lines inside continuations (NoEmptyContinuation), and the two above (LegacyKeyValueFormat, MaintainerDeprecated)
 - Supports heredocs in `RUN` steps
 - Keeps the file's line endings: CRLF files stay CRLF (a file with mixed line endings gets its most common one, unless that would change a heredoc or quoted value)
 - Keeps the trailing newline as it is, unless told otherwise

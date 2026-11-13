@@ -16,14 +16,14 @@ var formatters map[string]directiveFormatter
 
 func init() {
 	formatters = map[string]directiveFormatter{
-		command.Add:         spaceSeparated(flagsOnOwnLines),
+		command.Add:         spaceSeparated(flagsOnOwnLines, nil),
 		command.Arg:         formatWords,
 		command.Cmd:         formatCmd,
-		command.Copy:        spaceSeparated(flagsOnOwnLines),
+		command.Copy:        spaceSeparated(flagsOnOwnLines, nil),
 		command.Entrypoint:  formatCmd,
 		command.Env:         formatEnv,
-		command.Expose:      spaceSeparated(argsOnOwnLines),
-		command.From:        spaceSeparated(singleLine),
+		command.Expose:      spaceSeparated(argsOnOwnLines, lowerExposeProtocols),
+		command.From:        spaceSeparated(singleLine, upperFromAs),
 		command.Healthcheck: formatWords,
 		command.Label:       formatWords,
 		command.Maintainer:  formatMaintainer,
@@ -33,7 +33,7 @@ func init() {
 		command.StopSignal:  formatWords,
 		command.User:        formatWords,
 		command.Volume:      formatWords,
-		command.Workdir:     spaceSeparated(singleLine),
+		command.Workdir:     spaceSeparated(singleLine, nil),
 	}
 }
 
@@ -177,8 +177,9 @@ const (
 )
 
 // spaceSeparated returns a formatter for instructions whose arguments are
-// flags and space-separated words (COPY, ADD, EXPOSE, FROM, WORKDIR).
-func spaceSeparated(mode multilineMode) directiveFormatter {
+// flags and space-separated words (COPY, ADD, EXPOSE, FROM, WORKDIR). If set,
+// normalize rewrites the words in place.
+func spaceSeparated(mode multilineMode, normalize func(words []string)) directiveFormatter {
 	return func(n *node, c *Config) string {
 		region, ok := scanFlagsRegion(n)
 		if !ok || n.hasCommentLines() {
@@ -208,6 +209,9 @@ func spaceSeparated(mode multilineMode) directiveFormatter {
 			for i, a := range args {
 				args[i] = strings.Trim(a, " \t")
 			}
+			if normalize != nil {
+				normalize(args)
+			}
 			content = strings.Join(args, sep)
 		}
 		if content == "" {
@@ -216,6 +220,36 @@ func spaceSeparated(mode multilineMode) directiveFormatter {
 		onOwnLines := mode == flagsOnOwnLines && (n.multiline() || hasMountFlag(flags))
 		return n.keyword() + " " + layoutFlags(flags, content, c, escape, onOwnLines) + "\n"
 	}
+}
+
+// upperFromAs writes the AS of "FROM image AS name" in the case of the FROM
+// keyword, which the formatter writes in upper case (BuildKit's FromAsCasing
+// check).
+func upperFromAs(words []string) {
+	if len(words) == 3 && strings.EqualFold(words[1], "AS") {
+		words[1] = "AS"
+	}
+}
+
+// lowerExposeProtocols writes EXPOSE protocols in lower case, as BuildKit
+// reads them (its ExposeProtoCasing check).
+func lowerExposeProtocols(words []string) {
+	for i, w := range words {
+		words[i] = lowerExposeProtocol(w)
+	}
+}
+
+// lowerExposeProtocol lowers the protocol of a port spec such as "80/TCP".
+// A protocol given by a variable is left alone.
+func lowerExposeProtocol(port string) string {
+	p, proto, ok := strings.Cut(port, "/")
+	switch strings.ToLower(proto) {
+	case "tcp", "udp", "sctp":
+		if ok {
+			return p + "/" + strings.ToLower(proto)
+		}
+	}
+	return port
 }
 
 // safeAsWords reports whether JSON-form arguments can be written in the

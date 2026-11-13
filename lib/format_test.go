@@ -611,6 +611,11 @@ func TestRegressions(t *testing.T) {
 		{"ignore comment must be the last comment", "# dockerfmt-ignore\n# other\nFROM   a\n", "# dockerfmt-ignore\n# other\nFROM a\n"},
 		{"chomped heredoc is indented with tabs", "FROM a\nRUN <<-EOF\n\tif true; then\n\t\techo   x\n\tfi\nEOF\n",
 			"FROM a\nRUN <<-EOF\nif true; then\n\techo x\nfi\nEOF\n"},
+		{"FROM AS takes the case of FROM", "from a as b\nFROM c As d\n", "FROM a AS b\nFROM c AS d\n"},
+		{"EXPOSE protocols are lower case", "FROM a\nEXPOSE 80/TCP 53/Udp ${P}/SCTP 9/${PROTO} 8080\n",
+			"FROM a\nEXPOSE 80/tcp 53/udp ${P}/sctp 9/${PROTO} 8080\n"},
+		{"blank lines inside a continuation are removed", "FROM a\nENV A=1 \\\n\n  B=2\nLABEL a=1 \\\n  \n  # c\n  b=2\n",
+			"FROM a\nENV A=1 \\\n    B=2\nLABEL a=1 \\\n    # c\n    b=2\n"},
 		{"stray carriage returns", "FROM a\r\r\nRUN  echo a\r", "FROM a\r\nRUN echo a\r\n"},
 	}
 	for _, tt := range tests {

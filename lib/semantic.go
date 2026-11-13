@@ -180,6 +180,11 @@ func semanticKeyIn(n *parser.Node, ctx instrContext, env fakeEnv) (string, error
 		}
 	}
 	switch c := v.(type) {
+	case *instructions.ExposeCommand:
+		// BuildKit lowers the protocol when it sets the exposed ports.
+		for i, p := range c.Ports {
+			c.Ports[i] = lowerExposeProtocol(p)
+		}
 	case *instructions.EnvCommand:
 		// NoDelim only records whether the legacy "ENV key value" form was used.
 		for i := range c.Env {

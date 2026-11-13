@@ -171,11 +171,13 @@ func reindentContinuations(raw string, indentSize uint, escape rune, trimRight b
 		case i == 0:
 			text = trimIndent(text)
 		case cl.start == startDropped:
-			if trimmed := trimIndent(text); trimmed != "" {
-				text = indent + trimmed
-			} else {
-				text = ""
+			trimmed := trimIndent(text)
+			if trimmed == "" {
+				// A blank line, which BuildKit warns about
+				// (NoEmptyContinuation).
+				continue
 			}
+			text = indent + trimmed
 		case cl.start == startAfterSpace:
 			text = indent + trimIndent(text)
 		case cl.start == startAfterWord:

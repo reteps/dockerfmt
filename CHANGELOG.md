@@ -37,6 +37,17 @@ bugs found by fuzzing and review. Some defaults changed; see below.
   symbolic links are kept, it works in read-only directories, and a failed
   write restores the original contents.
 
+### Build checks
+
+Formatting now fixes these BuildKit build-check warnings, none of which change
+the build:
+
+- FromAsCasing: `from a as b` becomes `FROM a AS b`.
+- ExposeProtoCasing: `EXPOSE 80/TCP` becomes `EXPOSE 80/tcp`.
+- NoEmptyContinuation: blank lines inside `ENV`, `LABEL` and other
+  continued instructions are removed (BuildKit ignores them, and will reject
+  them in a future release). Lines holding only `\` are kept.
+
 ### Fixes
 
 - Quoted flag values (`--chown="my user"`) kept their quotes; `--` ending the

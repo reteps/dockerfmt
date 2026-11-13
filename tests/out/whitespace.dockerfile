@@ -1,5 +1,5 @@
 # https://github.com/reteps/dockerfmt/issues/1#issuecomment-2785329824
-FROM node:lts-alpine as builder
+FROM node:lts-alpine AS builder
 
 # 安装与编译代码
 COPY . /app
