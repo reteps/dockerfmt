@@ -88,8 +88,8 @@ RUN for i in 1 2; do \
 # case
 FROM a
 RUN case "$x" in \
-    a) echo a ;; \
-    *) echo other ;; \
+        a) echo a ;; \
+        *) echo other ;; \
     esac
 
 # background job

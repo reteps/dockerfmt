@@ -206,6 +206,7 @@ func shellPrinter(c *Config, indent uint) *syntax.Printer {
 		syntax.SpaceRedirects(c.SpaceRedirects),
 		syntax.Indent(indent),
 		syntax.BinaryNextLine(true),
+		syntax.SwitchCaseIndent(true),
 	)
 }
 
@@ -365,7 +366,8 @@ func continueStatements(src string, srcFile *syntax.File, out, indent string) (s
 		}
 		lines[i+1] = indent + next
 		stmtIndent = lines[i+1][:len(lines[i+1])-len(trimIndent(lines[i+1]))]
-		closes := strings.HasPrefix(trimIndent(next), ")") // needs no separator before it
+		// These need no separator before them.
+		closes := strings.HasPrefix(trimIndent(next), ")") || strings.HasPrefix(trimIndent(next), ";")
 		if !closes && !openers[end-(len(line)-len(trimmed))] && !strings.HasSuffix(trimmed, "&") && !strings.HasSuffix(trimmed, ";") {
 			b.WriteString(";")
 		}
