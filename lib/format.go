@@ -147,11 +147,15 @@ func (f *fileFormatter) checked(n *node) string {
 	return out
 }
 
-// endsInContinuation reports whether the last line of s ends in a line
-// continuation.
+// endsInContinuation reports whether the last non-blank line of s ends in a
+// line continuation. BuildKit skips blank lines inside a continuation, so
+// one followed by blank lines up to the end of the file still continues.
 func endsInContinuation(s string, escape rune) bool {
-	s = strings.TrimSuffix(s, "\n")
-	_, ok := isContinuation(s[strings.LastIndexByte(s, '\n')+1:], escape)
+	lines := strings.Split(strings.TrimSuffix(s, "\n"), "\n")
+	for len(lines) > 1 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	_, ok := isContinuation(lines[len(lines)-1], escape)
 	return ok
 }
 
