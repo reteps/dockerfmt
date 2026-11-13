@@ -44,6 +44,10 @@ the build:
 
 - FromAsCasing: `from a as b` becomes `FROM a AS b`.
 - ExposeProtoCasing: `EXPOSE 80/TCP` becomes `EXPOSE 80/tcp`.
+- LegacyKeyValueFormat: `LABEL key value` is rewritten as `LABEL key=value`,
+  as `ENV` already was, and so are values with quotes or escapes, whose
+  whitespace is escaped. A value written across several lines keeps its line
+  breaks inside quotes.
 - NoEmptyContinuation: blank lines inside `ENV`, `LABEL` and other
   continued instructions are removed (BuildKit ignores them, and will reject
   them in a future release). Lines holding only `\` are kept.

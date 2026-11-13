@@ -2,6 +2,7 @@ package lib
 
 import (
 	"strings"
+	"unicode"
 
 	"github.com/moby/buildkit/frontend/dockerfile/command"
 )
@@ -21,11 +22,11 @@ func init() {
 		command.Cmd:         formatCmd,
 		command.Copy:        spaceSeparated(flagsOnOwnLines, nil),
 		command.Entrypoint:  formatCmd,
-		command.Env:         formatEnv,
+		command.Env:         formatKeyValues,
 		command.Expose:      spaceSeparated(argsOnOwnLines, lowerExposeProtocols),
 		command.From:        spaceSeparated(singleLine, upperFromAs),
 		command.Healthcheck: formatHealthcheck,
-		command.Label:       formatWords,
+		command.Label:       formatKeyValues,
 		command.Maintainer:  formatMaintainer,
 		command.Onbuild:     formatOnbuild,
 		command.Run:         formatRun,
@@ -114,45 +115,91 @@ func bareInstruction(keyword string, flags []string) string {
 	return strings.Join(append([]string{keyword}, flags...), " ") + "\n"
 }
 
-func formatEnv(n *node, c *Config) string {
+// formatKeyValues formats ENV and LABEL, whose arguments are key=value
+// pairs, rewriting the legacy "key value" form (LegacyKeyValueFormat).
+func formatKeyValues(n *node, c *Config) string {
 	if n.next == nil {
 		return n.keyword() + "\n"
 	}
-	// BuildKit parses the legacy "ENV key value" form into a key/value pair
-	// whose third node, the delimiter, is empty.
-	if n.next.next.next.Value == "" {
-		if n.hasCommentLines() {
-			return n.source
+	// BuildKit parses the legacy form into a key/value pair whose third
+	// node, the delimiter, is empty.
+	if n.next.next != nil && n.next.next.next != nil && n.next.next.next.Value == "" && !n.hasCommentLines() {
+		if out, ok := formatLegacyKeyValue(n); ok {
+			return out
 		}
-		return formatLegacyEnv(n.keyword(), n.next.Value, n.next.next.Value)
-	}
-	content, ok := n.content()
-	if !ok {
 		return n.source
 	}
-	return n.keyword() + " " + reindentContinuations(content, c.indent(), n.context().escape, true)
+	return formatWords(n, c)
 }
 
-// formatLegacyEnv rewrites "ENV key value" as "ENV key=value". Everything after
-// the key is the value, so a value with whitespace is quoted, or the new form
-// would read it as several pairs. A value that also contains quotes or
-// backslashes can't be quoted without changing it, so it keeps the legacy form.
-func formatLegacyEnv(keyword, key, value string) string {
-	if !strings.ContainsAny(value, " \t") || isQuotedWord(value) {
-		return keyword + " " + key + "=" + value + "\n"
+// formatLegacyKeyValue rewrites "KEY key value" as "KEY key=value", where
+// everything after the key, as written, is the value. Whitespace in the value
+// must not separate words in the new form, so a value with whitespace is
+// quoted if it has no quotes or escapes, and otherwise has that whitespace
+// escaped. A value written across several lines is quoted with its line
+// breaks.
+func formatLegacyKeyValue(n *node) (string, bool) {
+	escape := n.context().escape
+	content, _ := n.content()
+	key := n.next.Value
+	value, ok := strings.CutPrefix(trimIndent(content), key)
+	if !ok {
+		return "", false
 	}
-	if strings.ContainsAny(value, "\"'\\") {
-		return keyword + " " + key + " " + value + "\n"
+	// BuildKit trims the whitespace around the value, including any line
+	// break before it.
+	value = strings.TrimRightFunc(trimLeadingContinuation(trimIndent(value), escape), unicode.IsSpace)
+	// Variables expand the same inside double quotes.
+	special := "\"'" + string(escape)
+	switch {
+	case n.multiline():
+		// The continuation lines start inside the quotes, so they are kept
+		// as written.
+		if strings.ContainsAny(strings.ReplaceAll(value, string(escape)+"\n", ""), special) {
+			return "", false
+		}
+		return n.keyword() + " " + key + "=\"" + value + "\"\n", true
+	case !hasUnquotedSpace(value, escape):
+		return n.keyword() + " " + key + "=" + value + "\n", true
+	case !strings.ContainsAny(value, special):
+		return n.keyword() + " " + key + "=\"" + value + "\"\n", true
+	default:
+		return n.keyword() + " " + key + "=" + escapeUnquotedSpace(value, escape) + "\n", true
 	}
-	return keyword + " " + key + "=\"" + value + "\"\n"
 }
 
-// isQuotedWord reports whether s is a single word wrapped in matching quotes.
-func isQuotedWord(s string) bool {
-	if len(s) < 2 || (s[0] != '"' && s[0] != '\'') || s[len(s)-1] != s[0] {
-		return false
+// hasUnquotedSpace reports whether s has whitespace outside quotes that
+// isn't escaped, which would separate words.
+func hasUnquotedSpace(s string, escape rune) bool {
+	return escapeUnquotedSpace(s, escape) != s
+}
+
+// escapeUnquotedSpace puts the escape character before each whitespace
+// character of s that is outside quotes and not already escaped, following
+// BuildKit's word splitting.
+func escapeUnquotedSpace(s string, escape rune) string {
+	var b strings.Builder
+	var quote rune
+	escaped := false
+	for _, ch := range s {
+		switch {
+		case escaped:
+			escaped = false
+		case quote == 0 && unicode.IsSpace(ch):
+			b.WriteRune(escape)
+		case quote == 0 && (ch == '\'' || ch == '"'):
+			quote = ch
+		case quote == 0 && ch == escape:
+			escaped = true
+		case quote == 0:
+		case ch == quote:
+			quote = 0
+		case ch == escape && quote != '\'':
+			escaped = true
+		}
+		b.WriteRune(ch)
 	}
-	return !strings.ContainsAny(s[1:len(s)-1], string(s[0])+"\\")
+	return b.String()
 }
 
 // formatWords formats instructions whose arguments are words (ARG, LABEL,

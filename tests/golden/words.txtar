@@ -20,7 +20,7 @@ ENV PATH $PATH:/opt/bin /usr/x
 FROM alpine
 ENV A "one two"
 
-# ENV legacy value with embedded quotes stays legacy
+# ENV legacy value with embedded quotes has its spaces escaped
 FROM alpine
 ENV A say "hi" there
 
@@ -118,9 +118,9 @@ ENV PATH="$PATH:/opt/bin /usr/x"
 FROM alpine
 ENV A="one two"
 
-# ENV legacy value with embedded quotes stays legacy
+# ENV legacy value with embedded quotes has its spaces escaped
 FROM alpine
-ENV A say "hi" there
+ENV A=say\ "hi"\ there
 
 # ENV modern format
 FROM alpine
@@ -453,3 +453,26 @@ VOLUME /data /logs
 VOLUME ["/data", "/x"]
 USER me
 STOPSIGNAL SIGTERM
+-- legacy key value --
+FROM a
+LABEL foo bar baz
+LABEL version 1.0
+ENV C x\ y
+ENV P "a b"/c   d
+ENV Q a  "b  c"  'd'
+ENV M --opt="a b"
+ENV V $HOME/x  y
+ENV DEPS \
+    curl \
+    git
+-- want --
+FROM a
+LABEL foo="bar baz"
+LABEL version=1.0
+ENV C=x\ y
+ENV P="a b"/c\ \ \ d
+ENV Q=a\ \ "b  c"\ \ 'd'
+ENV M=--opt="a b"
+ENV V="$HOME/x  y"
+ENV DEPS="curl \
+    git"

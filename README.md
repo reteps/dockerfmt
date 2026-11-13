@@ -68,7 +68,7 @@ RUN apt-get update \
 - Formats shell commands in `RUN` steps via [shfmt](https://github.com/mvdan/sh) — consistent `&&` chains, indentation, quoting
 - Preserves and re-aligns inline comments, even across multiline `RUN` steps
 - Normalizes whitespace and extra blank lines across all directives
-- Converts legacy `ENV` syntax (`ENV key value` → `ENV key=value`)
+- Converts legacy `ENV` and `LABEL` syntax (`ENV key value` → `ENV key=value`)
 - Upgrades deprecated directives (`MAINTAINER` → `LABEL`)
 - Fixes what BuildKit's [build checks](https://docs.docker.com/reference/build-checks/) flag where that can't change the build: `AS` in the case of `FROM` (FromAsCasing), lower-case `EXPOSE` protocols (ExposeProtoCasing), no blank lines inside continuations (NoEmptyContinuation), and the two above (LegacyKeyValueFormat, MaintainerDeprecated)
 - Supports heredocs in `RUN` steps
