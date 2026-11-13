@@ -184,6 +184,24 @@ func gluesToNext(line string, next []string) bool {
 	return next[0] != "" && !strings.ContainsRune(" \t\n", rune(next[0][0]))
 }
 
+// argsOnLines reports whether the content after the flags, as written,
+// continues onto more lines: its arguments are then laid out one per line.
+func (r *flagsRegion) argsOnLines(escape rune) bool {
+	lines := strings.Split(strings.TrimRight(trimLeadingContinuation(r.content, escape), "\n"), "\n")
+	for _, l := range lines[:len(lines)-1] {
+		if _, ok := isContinuation(l, escape); ok && !isDroppedLine(l) {
+			return true
+		}
+	}
+	return false
+}
+
+// continuedSep returns the separator that puts what follows on a new
+// continuation line.
+func continuedSep(c *Config, escape rune) string {
+	return " " + string(escape) + "\n" + c.indent()
+}
+
 // withFlags puts flags before content. Each flag goes on its own continuation
 // line if any of them is a --mount flag, which tend to be long.
 func withFlags(flags []string, content string, c *Config, escape rune) string {

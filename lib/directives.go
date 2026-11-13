@@ -65,11 +65,18 @@ func formatRun(n *node, c *Config) string {
 		} else {
 			content = n.heredocs()
 		}
+		if !region.hasLines() {
+			// The heredoc stays on the flags' line unless it was written on
+			// its own, or there are several mounts.
+			flags := region.flags()
+			onOwnLines := region.contentOnOwnLine || hasMountFlag(flags) && len(flags) > 1
+			return n.keyword() + " " + layoutFlags(flags, content, c, ctx.escape, onOwnLines)
+		}
 	case n.Attributes["json"]:
 		if n.hasCommentLines() {
 			return n.source
 		}
-		content = marshalJSONStringArray(n.args()) + "\n"
+		content = jsonArgs(n, &region, c) + "\n"
 	case strings.TrimSpace(region.content) == "":
 		return bareInstruction(n.keyword(), region.flags())
 	default:
@@ -103,7 +110,7 @@ func formatCmd(n *node, c *Config) string {
 		}
 		// BuildKit decides what is JSON: an argument list it can't decode,
 		// like ["a",], is shell form and must stay that way.
-		return n.keyword() + " " + withFlags(region.flags(), marshalJSONStringArray(n.args())+"\n", c, n.context().escape)
+		return n.keyword() + " " + withFlags(region.flags(), jsonArgs(n, &region, c)+"\n", c, n.context().escape)
 	}
 	content := region.content
 	if strings.TrimSpace(content) == "" {
@@ -118,6 +125,16 @@ func formatCmd(n *node, c *Config) string {
 func shellBodyOrAsWritten(body string, c *Config) string {
 	out, _ := formatShellBody(body, c)
 	return out
+}
+
+// jsonArgs returns n's JSON-form arguments as an array, one element per line
+// if it was written across lines.
+func jsonArgs(n *node, region *flagsRegion, c *Config) string {
+	sep := " "
+	if region.argsOnLines(n.context().escape) {
+		sep = continuedSep(c, n.context().escape)
+	}
+	return marshalJSONStringArraySep(n.args(), sep)
 }
 
 // bareInstruction formats an instruction that has no arguments after its
@@ -289,14 +306,14 @@ func spaceSeparated(mode multilineMode, normalize func(words []string)) directiv
 		}
 
 		sep := " "
-		if mode == argsOnOwnLines && n.multiline() {
-			sep = " " + string(escape) + "\n" + c.indent()
+		if mode == argsOnOwnLines && n.multiline() || mode == flagsOnOwnLines && region.argsOnLines(escape) {
+			sep = continuedSep(c, escape)
 		}
 		args := n.args()
 		var content string
 		switch {
 		case n.Attributes["json"] && !safeAsWords(args):
-			content = marshalJSONStringArray(args)
+			content = jsonArgs(n, &region, c)
 		case n.Attributes["json"]:
 			// BuildKit expands each argument the same way in both forms.
 			content = strings.Join(args, sep)

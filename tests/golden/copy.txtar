@@ -113,3 +113,25 @@ FROM a
 COPY ["C:\\foo", "D:\\"]
 COPY --from=x ["\\PowerShell\\", "$ProgramFiles\\PowerShell"]
 COPY src /dst/
+-- sources on separate lines --
+FROM a
+COPY \
+  a \
+  b \
+  c ./.patches/
+COPY --chown=1:1 \
+ a \
+ b \
+ /c/
+COPY a  b /c/
+-- want --
+FROM a
+COPY a \
+    b \
+    c \
+    ./.patches/
+COPY --chown=1:1 \
+    a \
+    b \
+    /c/
+COPY a b /c/

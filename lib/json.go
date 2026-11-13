@@ -9,11 +9,17 @@ import (
 // Dockerfile exec form: ["a", "b"]. Unlike encoding/json, it doesn't escape
 // <, > and & for HTML.
 func marshalJSONStringArray(items []string) string {
+	return marshalJSONStringArraySep(items, " ")
+}
+
+// marshalJSONStringArraySep is marshalJSONStringArray with sep after each
+// comma, such as a line continuation.
+func marshalJSONStringArraySep(items []string, sep string) string {
 	var b strings.Builder
 	b.WriteByte('[')
 	for i, item := range items {
 		if i > 0 {
-			b.WriteString(", ")
+			b.WriteString("," + sep)
 		}
 		writeJSONString(&b, item)
 	}

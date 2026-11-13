@@ -54,6 +54,10 @@ the build:
 
 ### Formatting
 
+- Arguments written one per line stay one per line: COPY and ADD sources,
+  and the elements of JSON arrays. The continued arguments of the first
+  command in a `&&` chain are indented like those of the commands after it.
+  A heredoc stays on the line of a single `--mount` flag.
 - Shell bodies with several statements, such as the `set -eux; \` style of
   the official images, and `if`, `for`, `case` and `{ }` blocks, are
   formatted, with each statement on its own continued line ending in `; \`.

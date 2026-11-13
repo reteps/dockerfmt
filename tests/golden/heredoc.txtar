@@ -152,3 +152,21 @@ EOF
 RUN cat <<EOF > /etc/app.conf
 key =   value
 EOF
+-- after a mount --
+FROM a
+RUN --mount=target=/root/.cache,type=cache <<EOT
+echo hi
+EOT
+RUN --mount=type=cache,target=/a --mount=type=cache,target=/b <<EOT
+echo hi
+EOT
+-- want --
+FROM a
+RUN --mount=target=/root/.cache,type=cache <<EOT
+echo hi
+EOT
+RUN --mount=type=cache,target=/a \
+    --mount=type=cache,target=/b \
+    <<EOT
+echo hi
+EOT

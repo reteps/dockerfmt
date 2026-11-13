@@ -61,3 +61,16 @@ CMD ["a",]
 ENTRYPOINT [not json]
 CMD ["ok", "x"]
 RUN ["a",]
+-- arrays written across lines --
+FROM a
+SHELL ["powershell", "-Command", \
+  "$ErrorActionPreference = 'Stop';"]
+CMD [ "a", \
+  "b" ]
+-- want --
+FROM a
+SHELL ["powershell", \
+    "-Command", \
+    "$ErrorActionPreference = 'Stop';"]
+CMD ["a", \
+    "b"]
