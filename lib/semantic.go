@@ -141,7 +141,9 @@ func semanticKeyIn(n *parser.Node, ctx instrContext, env fakeEnv) (string, error
 	case *instructions.Stage:
 		return fmt.Sprintf("FROM %q AS %q PLATFORM %q", c.BaseName, c.Name, c.Platform), nil
 	case *instructions.MaintainerCommand:
-		// formatMaintainer rewrites MAINTAINER as this LABEL.
+		// formatMaintainer rewrites MAINTAINER as this LABEL, a deliberate
+		// change the key accepts. It shares unwrapMaintainerQuotes with the
+		// formatter, so it can't catch a bug there; the tests do.
 		return labelKey([]string{maintainerLabel + "=" + unwrapMaintainerQuotes(c.Maintainer)}), nil
 	case *instructions.LabelCommand:
 		if err := c.Expand(exp); err != nil {

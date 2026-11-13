@@ -129,6 +129,14 @@ func (f *fileFormatter) checked(n *node) string {
 	return out
 }
 
+// endsInContinuation reports whether the last line of s ends in a line
+// continuation.
+func endsInContinuation(s string, escape rune) bool {
+	s = strings.TrimSuffix(s, "\n")
+	_, ok := isContinuation(s[strings.LastIndexByte(s, '\n')+1:], escape)
+	return ok
+}
+
 // verify checks out, the formatted form of n, and returns why it can't be
 // used, or "" if it can.
 func verify(n *node, out string, c *Config) (reason string) {
@@ -138,6 +146,11 @@ func verify(n *node, out string, c *Config) (reason string) {
 		}
 	}()
 	ctx := n.context()
+	if endsInContinuation(out, ctx.escape) && !endsInContinuation(n.source, ctx.escape) {
+		// It would run on into the next line of the file, which checking the
+		// instruction on its own can't show.
+		return "output ends in a line continuation"
+	}
 	formatted, err := parseFormatted(out, ctx)
 	if err != nil {
 		return err.Error()
