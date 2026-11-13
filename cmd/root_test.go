@@ -55,8 +55,17 @@ func TestFlagErrorsGoToStderr(t *testing.T) {
 }
 
 func TestVersion(t *testing.T) {
+	old := Version
+	t.Cleanup(func() { Version = old })
+	Version = "v1.2.3"
+
 	var stdout bytes.Buffer
 	code := execute([]string{"version"}, strings.NewReader(""), &stdout, io.Discard)
 	assert.Equal(t, 0, code)
-	assert.Equal(t, "dockerfmt "+Version+"\n", stdout.String())
+	assert.Equal(t, "dockerfmt v1.2.3\n", stdout.String())
+}
+
+func TestCompleteVersionOffersNoFiles(t *testing.T) {
+	_, directive := complete(t, "version", "")
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
 }

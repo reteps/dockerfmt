@@ -24,8 +24,8 @@ func parsedFlags(t *testing.T, args ...string) *pflag.FlagSet {
 
 func mustApplyEditorConfig(t *testing.T, c lib.Config, path string, flags *pflag.FlagSet) lib.Config {
 	t.Helper()
-	got, err := applyEditorConfig(c, path, flags)
-	require.NoError(t, err)
+	got, warnings := applyEditorConfig(c, path, flags)
+	require.Empty(t, warnings)
 	return got
 }
 
@@ -99,40 +99,67 @@ func TestEditorConfigIndentSize(t *testing.T) {
 		name     string
 		settings string
 		want     uint
-		wantErr  string
+		warning  string
 	}{
 		{"number", "indent_size = 2", 2, ""},
 		{"upper-case key", "INDENT_SIZE = 2", 2, ""},
 		{"tab uses tab_width", "indent_style = tab\nindent_size = tab\ntab_width = 3", 3, ""},
 		{"tab without a width", "indent_size = tab", 4, ""},
 		{"unset", "indent_size = unset", 4, ""},
-		{"not a number", "indent_size = two", 4, `indent_size = "two" is not a number`},
-		{"too large", "indent_size = 40", 4, "indent_size = 40 is not between 1 and 16"},
+		{"not a number", "indent_size = two", 4, "ignoring .editorconfig setting indent_size = two: must be a number from 1 to 16"},
+		{"too large", "indent_size = 40", 4, "ignoring .editorconfig setting indent_size = 40: must be a number from 1 to 16"},
+		{"bad tab width", "indent_size = tab\ntab_width = 0", 4, "ignoring .editorconfig setting tab_width = 0: must be a number from 1 to 16"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			writeProject(t, "root = true\n\n[Dockerfile]\n"+tt.settings+"\n")
-			got, err := applyEditorConfig(lib.Config{IndentSize: 4}, "Dockerfile", parsedFlags(t))
-			if tt.wantErr == "" {
-				require.NoError(t, err)
+			got, warnings := applyEditorConfig(lib.Config{IndentSize: 4}, "Dockerfile", parsedFlags(t))
+			if tt.warning == "" {
+				assert.Empty(t, warnings)
 			} else {
-				require.ErrorContains(t, err, tt.wantErr)
+				assert.Equal(t, []string{tt.warning}, warnings)
 			}
 			assert.Equal(t, tt.want, got.IndentSize)
 		})
 	}
 }
 
-func TestEditorConfigInvalidSpaceRedirects(t *testing.T) {
+func TestEditorConfigReportsEveryInvalidSetting(t *testing.T) {
+	writeProject(t, "root = true\n\n[Dockerfile]\nindent_size = abc\nSPACE_REDIRECTS = maybe\n")
+	got, warnings := applyEditorConfig(lib.Config{IndentSize: 4}, "Dockerfile", parsedFlags(t))
+	assert.Equal(t, []string{
+		"ignoring .editorconfig setting indent_size = abc: must be a number from 1 to 16",
+		"ignoring .editorconfig setting space_redirects = maybe: must be true or false",
+	}, warnings)
+	assert.Equal(t, uint(4), got.IndentSize)
+}
+
+func TestEditorConfigValidSettingsStillApply(t *testing.T) {
 	writeProject(t, "root = true\n\n[Dockerfile]\nspace_redirects = maybe\nindent_size = 2\n")
-	got, err := applyEditorConfig(lib.Config{IndentSize: 4}, "Dockerfile", parsedFlags(t))
-	require.ErrorContains(t, err, `space_redirects = "maybe" is not true or false`)
-	assert.Equal(t, uint(2), got.IndentSize, "the valid settings still apply")
+	got, warnings := applyEditorConfig(lib.Config{IndentSize: 4}, "Dockerfile", parsedFlags(t))
+	assert.Len(t, warnings, 1)
+	assert.Equal(t, uint(2), got.IndentSize)
+}
+
+// The library rejects the whole file for some invalid values, as well as for
+// syntax errors.
+func TestEditorConfigUnreadable(t *testing.T) {
+	for _, contents := range []string{
+		"root = true\n[Dockerfile\nindent_size = 2\n",
+		"root = true\n[Dockerfile]\nindent_size = 2\ninsert_final_newline = perhaps\n",
+	} {
+		writeProject(t, contents)
+		got, warnings := applyEditorConfig(lib.Config{IndentSize: 4}, "Dockerfile", parsedFlags(t))
+		require.Len(t, warnings, 1)
+		assert.True(t, strings.HasPrefix(warnings[0], "ignoring .editorconfig: "), warnings[0])
+		assert.NotContains(t, warnings[0], "\n")
+		assert.Equal(t, uint(4), got.IndentSize)
+	}
 }
 
 func TestCLIWarnsOnceAboutBrokenEditorConfig(t *testing.T) {
 	writeProject(t, "root = true\n\n[Dockerfile]\nindent_size = huge\n")
-	code, _, stderr := runCLI(t, "", false, true, false, "Dockerfile", "docker/Dockerfile")
+	code, _, stderr := cli("", "-c", "Dockerfile", "docker/Dockerfile")
 	assert.Equal(t, 0, code)
-	assert.Equal(t, 1, strings.Count(stderr, `warning: indent_size = "huge" is not a number`), stderr)
+	assert.Equal(t, "dockerfmt: warning: ignoring .editorconfig setting indent_size = huge: must be a number from 1 to 16\n", stderr)
 }

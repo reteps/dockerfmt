@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"github.com/pmezard/go-difflib/difflib"
 	"github.com/reteps/dockerfmt/lib"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // stdinName is the file name that stands for stdin.
@@ -32,27 +34,23 @@ func run(cmd *cobra.Command, opts *options, args []string) int {
 	failed, unformatted := false, false
 	warned := make(map[string]bool)
 	for _, name := range args {
-		content, c, err := readInput(cmd, opts, name)
+		content, c, warnings, err := readInput(cmd, opts, name)
+		for _, w := range warnings {
+			// Many files share an .editorconfig, so each problem with one
+			// is reported once.
+			if !warned[w] {
+				warned[w] = true
+				fmt.Fprintf(stderr, "dockerfmt: warning: %s\n", w)
+			}
+		}
+		if err == nil {
+			var formatted bool
+			formatted, err = processInput(displayName(name), content, c, opts, stdout, stderr)
+			unformatted = unformatted || !formatted
+		}
 		if err != nil {
 			fmt.Fprintf(stderr, "dockerfmt: %v\n", err)
 			failed = true
-			continue
-		}
-		if c.warning != "" && !warned[c.warning] {
-			warned[c.warning] = true
-			fmt.Fprintf(stderr, "dockerfmt: warning: %s\n", c.warning)
-		}
-		displayName := name
-		if name == stdinName {
-			displayName = "stdin"
-		}
-		formatted, err := processInput(displayName, content, c.Config, opts, stdout, stderr)
-		switch {
-		case err != nil:
-			fmt.Fprintf(stderr, "dockerfmt: %s: %v\n", displayName, err)
-			failed = true
-		case !formatted:
-			unformatted = true
 		}
 	}
 
@@ -62,19 +60,17 @@ func run(cmd *cobra.Command, opts *options, args []string) int {
 	return 0
 }
 
-// inputConfig is the formatting configuration for one input.
-type inputConfig struct {
-	lib.Config
-	// warning is a problem with the .editorconfig settings, if any.
-	warning string
+func displayName(name string) string {
+	if name == stdinName {
+		return "stdin"
+	}
+	return name
 }
 
 // readInput reads the named input and works out how to format it: flags
 // given explicitly come first, then .editorconfig, then the defaults. Without
 // a setting for it, the output ends with a newline if the input does.
-func readInput(cmd *cobra.Command, opts *options, name string) ([]byte, inputConfig, error) {
-	var content []byte
-	var err error
+func readInput(cmd *cobra.Command, opts *options, name string) (content []byte, c lib.Config, warnings []string, err error) {
 	if name == stdinName {
 		content, err = io.ReadAll(cmd.InOrStdin())
 		if err != nil {
@@ -84,34 +80,28 @@ func readInput(cmd *cobra.Command, opts *options, name string) ([]byte, inputCon
 		content, err = os.ReadFile(name)
 	}
 	if err != nil {
-		return nil, inputConfig{}, err
+		return nil, c, nil, err
 	}
 
-	c := inputConfig{Config: opts.config()}
+	c = opts.config()
 	if !cmd.Flags().Changed("newline") {
 		c.TrailingNewline = len(content) > 0 && content[len(content)-1] == '\n'
 	}
 	if name != stdinName {
-		c.Config, err = applyEditorConfig(c.Config, name, cmd.Flags())
-		if err != nil {
-			c.warning = err.Error()
-		}
+		c, warnings = applyEditorConfig(c, name, cmd.Flags())
 	}
-	return content, c, nil
+	return content, c, warnings, nil
 }
 
 func isTerminal(r io.Reader) bool {
 	f, ok := r.(*os.File)
-	if !ok {
-		return false
-	}
-	info, err := f.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+	return ok && term.IsTerminal(int(f.Fd()))
 }
 
 // processInput formats one input and prints it, checks it or writes it back.
 // It reports whether the input was already formatted, which is only ever false
-// when checking. If formatting fails, nothing is printed or written.
+// when checking. If formatting fails, nothing is printed or written. Errors
+// name the input.
 func processInput(name string, content []byte, c lib.Config, opts *options, stdout, stderr io.Writer) (formatted bool, err error) {
 	c.OnFallback = func(line int, reason string) {
 		fmt.Fprintf(stderr, "%s:%d: left unformatted: %s\n", name, line, reason)
@@ -119,7 +109,7 @@ func processInput(name string, content []byte, c lib.Config, opts *options, stdo
 	original := string(content)
 	out, err := lib.Format(original, &c)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("%s: %w", name, err)
 	}
 
 	switch {
@@ -147,60 +137,53 @@ func processInput(name string, content []byte, c lib.Config, opts *options, stdo
 }
 
 // writeFile replaces the contents of the existing file name, which are
-// original, with data. The file is rewritten in place, so its permissions,
-// owner and hard links are kept. A backup of original is kept next to it
-// while writing, and restored if the write fails.
-func writeFile(name string, original, data []byte) (err error) {
-	info, err := os.Stat(name)
-	if err != nil {
-		return err
-	}
-	perm := info.Mode().Perm()
-	backup, err := backupFile(name, original, perm)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err != nil {
-			if rerr := os.Rename(backup, name); rerr != nil {
-				err = fmt.Errorf("%w (the original contents are in %s)", err, backup)
-			}
-			return
-		}
-		err = os.Remove(backup)
-	}()
-
-	f, err := os.OpenFile(name, os.O_WRONLY|os.O_TRUNC, perm)
+// original, with data. The file is rewritten in place, through any symbolic
+// link, so its permissions, owner and hard links are kept. If writing fails
+// after the file was truncated, original is written back; if that fails too,
+// it is saved to a temporary file, which the error names.
+func writeFile(name string, original, data []byte) error {
+	f, err := os.OpenFile(name, os.O_WRONLY|os.O_TRUNC, 0)
 	if err != nil {
 		return err
 	}
 	_, err = f.Write(data)
-	if cerr := f.Close(); err == nil {
-		err = cerr
+	if err == nil {
+		return f.Close()
 	}
+	if restoreErr := rewrite(f, original); restoreErr != nil {
+		err = fmt.Errorf("%w; restoring the original contents also failed: %w", err, restoreErr)
+		if saved, saveErr := saveCopy(name, original); saveErr == nil {
+			err = fmt.Errorf("%w; they are saved in %s", err, saved)
+		}
+	}
+	_ = f.Close()
 	return err
 }
 
-// backupFile writes data to a new file next to name and returns its path.
-func backupFile(name string, data []byte, perm os.FileMode) (path string, err error) {
-	f, err := os.CreateTemp(filepath.Dir(name), filepath.Base(name)+".*.dockerfmt-backup")
+// rewrite replaces the contents of f with data.
+func rewrite(f *os.File, data []byte) error {
+	if err := f.Truncate(0); err != nil {
+		return err
+	}
+	_, err := f.WriteAt(data, 0)
+	return err
+}
+
+// saveCopy writes data to a new temporary file named after name, and returns
+// its path.
+func saveCopy(name string, data []byte) (string, error) {
+	f, err := os.CreateTemp("", filepath.Base(name)+".*.orig")
 	if err != nil {
 		return "", err
 	}
-	defer func() {
-		if err != nil {
-			_ = os.Remove(f.Name())
-		}
-	}()
-	if err := f.Chmod(perm); err != nil {
-		_ = f.Close()
-		return "", err
+	_, err = f.Write(data)
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
 	}
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		return "", err
+	if err != nil {
+		return "", errors.Join(err, os.Remove(f.Name()))
 	}
-	return f.Name(), f.Close()
+	return f.Name(), nil
 }
 
 // unifiedDiff returns a git-style unified diff from a to b.

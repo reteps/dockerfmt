@@ -44,8 +44,6 @@ type options struct {
 	spaceRedirects     bool
 }
 
-const maxIndent = 16
-
 func (o *options) config() lib.Config {
 	return lib.Config{IndentSize: o.indent, TrailingNewline: o.newline, SpaceRedirects: o.spaceRedirects}
 }
@@ -57,8 +55,8 @@ func (o *options) validate(args []string) error {
 	if o.write && (len(args) == 0 || slices.Contains(args, "-")) {
 		return errors.New("-w/--write can't be used when reading from stdin")
 	}
-	if o.indent < 1 || o.indent > maxIndent {
-		return fmt.Errorf("-i/--indent must be between 1 and %d, got %d", maxIndent, o.indent)
+	if o.indent < 1 || o.indent > lib.MaxIndentSize {
+		return fmt.Errorf("-i/--indent must be a number from 1 to %d, got %d", lib.MaxIndentSize, o.indent)
 	}
 	return nil
 }
@@ -94,8 +92,9 @@ func newRootCmd(status *int) *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			*status = run(cmd, &opts, args)
 		},
-		// Positional arguments are Dockerfiles. Without this, cobra offers only
-		// subcommand names, because the root command has subcommands.
+		// Positional arguments are Dockerfiles. Without this, cobra offers
+		// only subcommand names, because the root command has subcommands;
+		// with it, file names too.
 		ValidArgsFunction: func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 			return nil, cobra.ShellCompDirectiveDefault
 		},
@@ -108,7 +107,7 @@ func newRootCmd(status *int) *cobra.Command {
 	flags.BoolVarP(&opts.check, "check", "c", false, "Check if the file(s) are formatted")
 	flags.BoolVarP(&opts.diff, "diff", "d", false, "Print a unified diff of the changes needed (implies --check)")
 	flags.BoolVarP(&opts.newline, "newline", "n", false, "End the file with a trailing newline (--newline=false: without one)")
-	flags.UintVarP(&opts.indent, "indent", "i", 4, "Number of spaces to use for indentation")
+	flags.UintVarP(&opts.indent, "indent", "i", lib.DefaultIndentSize, "Number of spaces to use for indentation")
 	flags.BoolVarP(&opts.spaceRedirects, "space-redirects", "s", false, "Redirect operators will be followed by a space")
 	_ = root.RegisterFlagCompletionFunc("indent", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return []string{"2", "4", "8"}, cobra.ShellCompDirectiveNoFileComp

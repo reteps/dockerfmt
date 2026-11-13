@@ -11,59 +11,71 @@ import (
 )
 
 // applyEditorConfig returns c with the .editorconfig settings for path
-// applied, except where a flag was given explicitly. It returns an error, and
-// c as far as it could be applied, if a setting or the file is invalid.
+// applied, except where a flag was given explicitly. It also returns a
+// warning for each setting that is invalid and so ignored, or for the whole
+// file if the library can't read it.
 //
 // Settings are read from def.Raw rather than the parsed fields such as
 // def.IndentSize: the library fills those through case-sensitive struct tags,
 // so "INDENT_SIZE = 2" would be ignored, while the specification makes key
 // names case-insensitive. Raw has every key lowercased.
-func applyEditorConfig(c lib.Config, path string, flags *pflag.FlagSet) (lib.Config, error) {
+func applyEditorConfig(c lib.Config, path string, flags *pflag.FlagSet) (lib.Config, []string) {
 	def, err := editorconfig.GetDefinitionForFilename(path)
 	if err != nil {
-		return c, fmt.Errorf("ignoring .editorconfig for %s: %w", path, err)
+		return c, []string{"ignoring .editorconfig: " + strings.Join(strings.Fields(err.Error()), " ")}
 	}
-	var problem error
+	var warnings []string
 	if !flags.Changed("indent") {
 		if n, ok, err := editorConfigIndent(def); err != nil {
-			problem = err
+			warnings = append(warnings, err.Error())
 		} else if ok {
 			c.IndentSize = n
 		}
 	}
-	if v, set := def.Raw["insert_final_newline"]; set && !flags.Changed("newline") {
-		if b, err := strconv.ParseBool(v); err == nil {
-			c.TrailingNewline = b
-		}
+	if b, ok, err := editorConfigBool(def, "insert_final_newline"); err != nil {
+		warnings = append(warnings, err.Error())
+	} else if ok && !flags.Changed("newline") {
+		c.TrailingNewline = b
 	}
 	// space_redirects is specific to dockerfmt.
-	if v, set := def.Raw["space_redirects"]; set && !flags.Changed("space-redirects") {
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			problem = fmt.Errorf("%s: space_redirects = %q is not true or false", path, v)
-		} else {
-			c.SpaceRedirects = b
-		}
+	if b, ok, err := editorConfigBool(def, "space_redirects"); err != nil {
+		warnings = append(warnings, err.Error())
+	} else if ok && !flags.Changed("space-redirects") {
+		c.SpaceRedirects = b
 	}
-	return c, problem
+	return c, warnings
 }
 
 // editorConfigIndent returns the indent size def sets, if any. indent_size =
 // tab means the tab width.
 func editorConfigIndent(def *editorconfig.Definition) (uint, bool, error) {
-	v := strings.ToLower(def.Raw["indent_size"])
+	key := "indent_size"
+	v := strings.ToLower(def.Raw[key])
 	if v == "tab" {
-		v = strings.ToLower(def.Raw["tab_width"])
+		key = "tab_width"
+		v = strings.ToLower(def.Raw[key])
 	}
 	if v == "" || v == editorconfig.UnsetValue {
 		return 0, false, nil
 	}
 	n, err := strconv.Atoi(v)
-	if err != nil {
-		return 0, false, fmt.Errorf("indent_size = %q is not a number", v)
-	}
-	if n < 1 || n > maxIndent {
-		return 0, false, fmt.Errorf("indent_size = %d is not between 1 and %d", n, maxIndent)
+	if err != nil || n < 1 || n > lib.MaxIndentSize {
+		return 0, false, fmt.Errorf("ignoring .editorconfig setting %s = %s: must be a number from 1 to %d", key, v, lib.MaxIndentSize)
 	}
 	return uint(n), true, nil
+}
+
+// editorConfigBool returns the boolean setting key of def, if set.
+func editorConfigBool(def *editorconfig.Definition, key string) (value, ok bool, err error) {
+	v, set := def.Raw[key]
+	if !set || strings.EqualFold(v, editorconfig.UnsetValue) {
+		return false, false, nil
+	}
+	switch strings.ToLower(v) {
+	case "true":
+		return true, true, nil
+	case "false":
+		return false, true, nil
+	}
+	return false, false, fmt.Errorf("ignoring .editorconfig setting %s = %s: must be true or false", key, v)
 }
