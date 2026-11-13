@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Thin launcher that execs the real `dockerfmt` Go binary. There is no JS
-// reimplementation of the CLI: the binary is built from cmd/root.go, so flags,
+// reimplementation of the CLI: the binary is built from cmd/, so flags,
 // defaults, EditorConfig handling and exit codes are guaranteed to match the
 // standalone Go tool exactly. Each platform's binary ships in its own optional
 // dependency (see optionalDependencies in package.json); npm installs only the

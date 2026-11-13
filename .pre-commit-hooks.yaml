@@ -15,4 +15,6 @@
   name: dockerfmt
   pass_filenames: true
   require_serial: false
-  exclude: (?i)\.dockerignore$
+  # Also matches names like Dockerfile.prod; these extensions are other kinds
+  # of files about Dockerfiles.
+  exclude: (?i)(\.dockerignore|\.(md|txt|go|py|js|ts|sh|json|ya?ml|j2|tmpl|tpl))$

@@ -156,7 +156,9 @@ The output ends with a newline if the input does. `--newline` adds one, and `--n
 
 `--indent` must be between 1 and 16. `--write` can't be combined with `--check` or `--diff`, or used with stdin. It rewrites each file in place, so the file keeps its permissions, owner and hard links; while writing, a backup of the original is kept next to it and restored if the write fails.
 
-Exit status is 1 if any input couldn't be read, parsed or written, or, with `--check` or `--diff`, isn't formatted; otherwise 0.
+`--check` prints `<file> is not formatted` and `--diff` prints the diff, both to stdout; errors and warnings go to stderr. Exit status is 1 if any input couldn't be read, parsed or written, or, with `--check` or `--diff`, isn't formatted; otherwise 0.
+
+A file named `version` must be given as `./version`, since `dockerfmt version` prints the version.
 
 ## Configuration
 
@@ -170,7 +172,7 @@ dockerfmt reads [EditorConfig](https://editorconfig.org/) files to pick up proje
 | `insert_final_newline`   | `--newline`          | Standard EditorConfig key   |
 | `space_redirects`        | `--space-redirects`  | Custom key (non-standard)   |
 
-Property names are case-insensitive. `indent_size = tab` uses `tab_width`. An invalid value is reported as a warning and ignored.
+Property names are case-insensitive. `indent_size = tab` uses `tab_width`, and indentation must be from 1 to 16. An invalid value is reported as a warning and ignored; some, such as an invalid `insert_final_newline`, make the EditorConfig library reject the whole file, which is then ignored with a warning.
 
 `.editorconfig` files are looked up from each Dockerfile's own directory upward (stopping at `root = true`), as the EditorConfig spec describes, so a repository-root `.editorconfig` also applies to Dockerfiles in subdirectories such as `docker/Dockerfile`.
 
@@ -210,7 +212,7 @@ Some content is deliberately left as written:
 
 ## Ignoring Directives
 
-To skip formatting for a specific directive, place a `# dockerfmt-ignore` comment on the line immediately before it:
+To skip formatting for a specific directive, make `# dockerfmt-ignore` the last comment before it (blank lines may come between):
 
 ```dockerfile
 # dockerfmt-ignore
@@ -246,6 +248,8 @@ The hook runs `dockerfmt --write --newline --space-redirects` by default. Settin
 
 - Shell bodies with several statements (`a; b`, `{ ...; }` groups) are left unformatted; see [Safety](#safety).
 - With a `# escape=` parser directive other than backslash, shell-form `RUN`/`CMD`/`ENTRYPOINT` bodies are left unformatted.
+- Shell bodies with backquoted command substitutions are left unformatted, since rewriting them as `$(...)` can change their meaning.
+- A stage's shell is worked out from `SHELL` instructions, from the stage it is built on, and from well-known Windows base images (which default to `cmd`); a stage built on another Windows image, named through a build argument for example, is formatted as POSIX shell. Add a `SHELL` instruction or `# dockerfmt-ignore` there.
 - No line wrapping for long JSON-form commands.
 - Input must be UTF-8 (a UTF-8 byte order mark is kept). Other encodings, such as the UTF-16 that Windows PowerShell's `>` writes by default, are rejected with an error, as are files BuildKit can't parse; dockerfmt then exits non-zero and leaves the file unchanged.
 

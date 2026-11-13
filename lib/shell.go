@@ -24,6 +24,7 @@ package lib
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -291,13 +292,14 @@ func reinsertLines(body shellBody, out string, c *Config) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	tokens := make(map[int]int) // source offset -> index in walk order
-	for i, p := range syntaxPositions(srcFile) {
+	srcPos := syntaxPositions(srcFile)
+	tokens := make(map[int]int, len(srcPos)) // source offset -> index in walk order
+	for i, p := range srcPos {
 		if _, ok := tokens[p]; !ok {
 			tokens[p] = i
 		}
 	}
-	nodes := len(syntaxPositions(srcFile))
+	nodes := len(srcPos)
 
 	groups, ok := groupInserts(body.inserts, tokens, nodes, out)
 	if !ok {
@@ -460,22 +462,17 @@ func lineIndent(out string, lineStart int, base string) string {
 	return line[:len(line)-len(strings.TrimLeft(line, " \t"))]
 }
 
+// shellOperators are the operators the printer starts continuation lines
+// with. "|&" comes before "|", which is a prefix of it.
+var shellOperators = []string{"&&", "||", "|&", "|"}
+
 func isOperator(s string) bool {
-	switch strings.TrimSpace(s) {
-	case "&&", "||", "|", "|&":
-		return true
-	}
-	return false
+	return slices.Contains(shellOperators, strings.TrimSpace(s))
 }
 
 func startsWithOperator(line string) bool {
 	line = strings.TrimLeft(line, " \t")
-	for _, op := range []string{"&&", "||", "|&", "|"} {
-		if strings.HasPrefix(line, op) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(shellOperators, func(op string) bool { return strings.HasPrefix(line, op) })
 }
 
 // formatScript formats the body of a heredoc that the shell runs as a
