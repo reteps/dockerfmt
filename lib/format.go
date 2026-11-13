@@ -158,7 +158,14 @@ func verify(n *node, out string, c *Config) (reason string) {
 	if same, why := equivalent(n.Node, formatted.Node, ctx); !same {
 		return why
 	}
-	if again, _, _ := formatRecovering(formatted, c); again != out {
+	// Comment lines can follow the instruction itself, when the formatter
+	// moved them out of a continuation; formatted from then on, they are
+	// lines between instructions.
+	rest, ok := strings.CutPrefix(out, formatted.source)
+	if !ok {
+		return "output doesn't start with the instruction"
+	}
+	if again, _, _ := formatRecovering(formatted, c); again != formatted.source || formatComments(strings.SplitAfter(rest, "\n"), false) != rest {
 		return "formatting it again would change it further"
 	}
 	return ""
