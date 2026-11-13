@@ -17,5 +17,4 @@ RUN cd /bar && yarn dlx node-gyp install && yarn install --immutable --inline-bu
 # NOTE: Modify .dockerignore to allowlist files/directories to copy.
 COPY . /bar/
 
-
 # ....

@@ -2,17 +2,17 @@ package lib
 
 import (
 	"fmt"
-	"log"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/moby/buildkit/frontend/dockerfile/parser"
 )
 
 // Config controls formatting.
 type Config struct {
-	// IndentSize is the number of spaces continuation lines are indented by.
-	// Zero means DefaultIndentSize.
+	// IndentSize is the number of spaces continuation lines are indented by,
+	// at most MaxIndentSize. Zero means DefaultIndentSize.
 	IndentSize uint
 	// TrailingNewline ends the output with a newline.
 	TrailingNewline bool
@@ -24,37 +24,31 @@ type Config struct {
 	OnFallback func(line int, reason string)
 }
 
-// DefaultIndentSize is the indentation used when Config.IndentSize is zero.
-const DefaultIndentSize = 4
+const (
+	// DefaultIndentSize is the indentation used when Config.IndentSize is
+	// zero.
+	DefaultIndentSize = 4
+	// MaxIndentSize is the largest Config.IndentSize allowed.
+	MaxIndentSize = 16
+)
 
 func (c *Config) indent() string {
 	return strings.Repeat(" ", int(c.IndentSize))
 }
 
 // Format formats the contents of a Dockerfile. It returns an error, and no
-// output, if the input isn't UTF-8 text or BuildKit can't parse it.
+// output, if the input isn't UTF-8 text, BuildKit can't parse it, or c is
+// invalid.
 //
 // The output keeps the input's line endings and UTF-8 byte order mark.
 func Format(content string, c *Config) (string, error) {
+	if c.IndentSize > MaxIndentSize {
+		return "", fmt.Errorf("indent size %d is larger than %d", c.IndentSize, MaxIndentSize)
+	}
 	if err := checkEncoding(content); err != nil {
 		return "", err
 	}
 	return formatContent(content, c)
-}
-
-// FormatFileLines formats a Dockerfile given as lines that each keep their
-// line ending, as returned by strings.SplitAfter(content, "\n"). Unlike
-// Format, it doesn't check the encoding, and it exits the process if the
-// file can't be parsed.
-//
-// Deprecated: Use Format.
-func FormatFileLines(fileLines []string, c *Config) string {
-	content := strings.Join(fileLines, "")
-	out, err := formatContent(content, c)
-	if err != nil {
-		log.Fatalf("Error parsing file: %v", err)
-	}
-	return out
 }
 
 // formatLines formats a Dockerfile given as lines that each end in "\n",
@@ -71,7 +65,7 @@ func formatLines(lines []string, c *Config) (string, error) {
 	for _, n := range newNode(result.AST, lines).children {
 		f.instruction(n)
 	}
-	f.out.WriteString(formatComments(lines[f.line:]))
+	f.out.WriteString(formatComments(lines[f.line:], f.line == 0))
 
 	out := strings.TrimRight(f.out.String(), "\n")
 	if c.TrailingNewline {
@@ -95,7 +89,7 @@ const ignoreComment = "# dockerfmt-ignore"
 
 func (f *fileFormatter) instruction(n *node) {
 	between := f.lines[f.line : n.StartLine-1]
-	f.out.WriteString(formatComments(between))
+	f.out.WriteString(formatComments(between, f.line == 0))
 	f.line = n.EndLine
 
 	out := n.source
@@ -137,7 +131,12 @@ func (f *fileFormatter) checked(n *node) string {
 
 // verify checks out, the formatted form of n, and returns why it can't be
 // used, or "" if it can.
-func verify(n *node, out string, c *Config) string {
+func verify(n *node, out string, c *Config) (reason string) {
+	defer func() {
+		if r := recover(); r != nil {
+			reason = fmt.Sprintf("checking the output failed: %v", r)
+		}
+	}()
 	ctx := n.context()
 	formatted, err := parseFormatted(out, ctx)
 	if err != nil {
@@ -163,26 +162,45 @@ func formatRecovering(n *node, c *Config) (out string, ok bool, reason string) {
 	return out, ok, ""
 }
 
+// hasIgnoreComment reports whether the last comment before an instruction,
+// among the lines between it and the previous one, is the ignore comment.
 func hasIgnoreComment(lines []string) bool {
-	for _, line := range lines {
-		if strings.TrimSpace(line) == ignoreComment {
-			return true
+	for i := len(lines) - 1; i >= 0; i-- {
+		if t := strings.TrimSpace(lines[i]); t != "" {
+			return t == ignoreComment
 		}
 	}
 	return false
 }
 
-var reBlankLines = regexp.MustCompile(`\n{3,}`)
+// reDirective matches a comment that would be a parser directive at the
+// start of a line, like "# syntax=docker/dockerfile:1".
+var reDirective = regexp.MustCompile(`(?i)^#\s*[a-z]+\s*=`)
 
-// formatComments formats the lines between instructions: whitespace is
-// trimmed and runs of blank lines are collapsed to one.
-func formatComments(lines []string) string {
+// formatComments formats the comment and blank lines between instructions:
+// leading and trailing whitespace is trimmed, and runs of blank lines become
+// one. Before the first instruction, where BuildKit reads parser directives,
+// an indented comment that would become a directive keeps its indentation.
+func formatComments(lines []string, first bool) string {
 	var b strings.Builder
+	blank := false
 	for _, line := range lines {
-		b.WriteString(strings.TrimSpace(line))
+		t := strings.TrimSpace(line)
+		if t == "" {
+			if blank {
+				continue
+			}
+			blank = true
+		} else {
+			blank = false
+			if first && reDirective.MatchString(t) {
+				t = strings.TrimRightFunc(line, unicode.IsSpace)
+			}
+		}
+		b.WriteString(t)
 		if strings.HasSuffix(line, "\n") {
 			b.WriteByte('\n')
 		}
 	}
-	return reBlankLines.ReplaceAllString(b.String(), "\n")
+	return b.String()
 }

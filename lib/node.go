@@ -18,8 +18,9 @@ type node struct {
 	// final line ending. It is empty for nodes without a position, such as
 	// the instruction inside ONBUILD.
 	source string
-	// ctx is the file-level state the instruction is interpreted in. nil
-	// means the defaults.
+	// ctx is the file-level state the instruction is interpreted in, set
+	// just before it is formatted. nil means the defaults, for nodes built
+	// outside a file walk, as in tests.
 	ctx *instrContext
 }
 
@@ -63,7 +64,13 @@ func (n *node) text() string {
 
 // multiline reports whether the instruction spans several lines.
 func (n *node) multiline() bool {
-	return strings.Contains(n.source, "\\\n")
+	escape := n.context().escape
+	for _, line := range strings.Split(n.source, "\n") {
+		if _, ok := isContinuation(line, escape); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // content returns the source text after the keyword and the whitespace
@@ -92,13 +99,14 @@ func (n *node) args() []string {
 	return args
 }
 
-// heredocs returns the instruction's argument line followed by each heredoc
-// body and terminator. If firstBody is set, it replaces the first body. ok is
-// false if the instruction has no heredocs.
-func (n *node) heredocs(firstBody *string) (string, bool) {
-	if len(n.Heredocs) == 0 {
-		return "", false
-	}
+// heredocs returns the argument line of an instruction with heredocs,
+// followed by each heredoc body and terminator.
+func (n *node) heredocs() string {
+	return n.heredocsWithScript(n.Heredocs[0].Content)
+}
+
+// heredocsWithScript is heredocs, with script in place of the first body.
+func (n *node) heredocsWithScript(script string) string {
 	var args []string
 	for _, a := range n.args() {
 		if a != "" {
@@ -109,12 +117,12 @@ func (n *node) heredocs(firstBody *string) (string, bool) {
 	b.WriteString(strings.Join(args, " ") + "\n")
 	for i, h := range n.Heredocs {
 		body := h.Content
-		if i == 0 && firstBody != nil {
-			body = *firstBody
+		if i == 0 {
+			body = script
 		}
 		b.WriteString(body + h.Name + "\n")
 	}
-	return b.String(), true
+	return b.String()
 }
 
 // hasCommentLines reports whether there are comment lines among the

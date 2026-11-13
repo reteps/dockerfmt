@@ -19,45 +19,23 @@ func TestFormatComments(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    []string
+		first    bool
 		expected string
 	}{
-		{"empty slice", []string{}, ""},
-		{"single comment", []string{"# comment\n"}, "# comment\n"},
-		{"leading whitespace stripped", []string{"  # comment\n"}, "# comment\n"},
-		{"three newlines collapsed to one", []string{"# a\n", "\n", "\n", "\n", "# b\n"}, "# a\n# b\n"},
-		{"two newlines preserved", []string{"# a\n", "\n", "# b\n"}, "# a\n\n# b\n"},
-		{"blank line around comment", []string{"\n", "# x\n", "\n"}, "\n# x\n\n"},
+		{"empty slice", []string{}, false, ""},
+		{"single comment", []string{"# comment\n"}, false, "# comment\n"},
+		{"leading whitespace stripped", []string{"  # comment\n"}, false, "# comment\n"},
+		{"blank lines after a comment become one", []string{"# a\n", "\n", "\n", "\n", "# b\n"}, false, "# a\n\n# b\n"},
+		{"one blank line preserved", []string{"# a\n", "\n", "# b\n"}, false, "# a\n\n# b\n"},
+		{"blank lines after an instruction become one", []string{"\n", "\n", "# x\n", "\n"}, false, "\n# x\n\n"},
+		{"would-be directive keeps its indentation", []string{" # syntax=docker/dockerfile:1\n"}, true, " # syntax=docker/dockerfile:1\n"},
+		{"would-be directive after the first instruction", []string{" # syntax=x\n"}, false, "# syntax=x\n"},
+		{"ordinary comment before the first instruction", []string{"  # hello\n"}, true, "# hello\n"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := formatComments(tt.input)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestIndentFollowingLines(t *testing.T) {
-	tests := []struct {
-		name       string
-		input      string
-		indentSize uint
-		expected   string
-	}{
-		{"empty string", "", 4, ""},
-		{"single line unchanged", "RUN echo\n", 4, "RUN echo\n"},
-		{"two lines indent 4", "A\nB\n", 4, "A\n    B\n"},
-		{"two lines indent 2", "A\nB\n", 2, "A\n  B\n"},
-		{"two lines indent 8", "A\nB\n", 8, "A\n        B\n"},
-		{"empty lines indented", "A\n\nB\n", 4, "A\n    \n    B\n"},
-		{"existing indent replaced", "A\n  B\n", 4, "A\n    B\n"},
-		{"three lines", "A\nB\nC\n", 4, "A\n    B\n    C\n"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := indentFollowingLines(tt.input, tt.indentSize)
-			assert.Equal(t, tt.expected, result)
+			assert.Equal(t, tt.expected, formatComments(tt.input, tt.first))
 		})
 	}
 }
@@ -183,20 +161,13 @@ func TestFormatShell(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var result string
 			if tt.hereDoc {
-				result = formatScript(tt.content, tt.config)
+				result = formatScript(tt.content, tt.config, false)
 			} else {
 				result = formatShellBody(tt.content, tt.config)
 			}
 			assert.Equal(t, tt.expected, result)
 		})
 	}
-}
-
-func formatDockerfile(t *testing.T, input string, c *Config) string {
-	t.Helper()
-	out, err := Format(input, c)
-	require.NoError(t, err)
-	return out
 }
 
 func TestConfigVariations(t *testing.T) {
@@ -253,7 +224,7 @@ func TestConfigVariations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := formatDockerfile(t, tt.input, tt.config)
+			result := mustFormat(t, tt.input, tt.config)
 			if tt.expected != "" {
 				assert.Equal(t, tt.expected, result)
 			}
@@ -434,7 +405,7 @@ func TestPerDirective(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := formatDockerfile(t, tt.input, defaultConfig)
+			result := mustFormat(t, tt.input, defaultConfig)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -476,32 +447,10 @@ func TestNewNode(t *testing.T) {
 	})
 }
 
-func TestGetHeredoc(t *testing.T) {
-	t.Run("node without heredoc returns false", func(t *testing.T) {
-		input := "FROM alpine\nRUN echo hello\n"
-		lines := strings.SplitAfter(input, "\n")
-		result, err := parser.Parse(strings.NewReader(input))
-		require.NoError(t, err)
-
-		root := newNode(result.AST, lines)
-		runNode := root.children[1]
-		_, ok := runNode.heredocs(nil)
-		assert.False(t, ok)
-	})
-
-	t.Run("node with heredoc returns content", func(t *testing.T) {
-		input := "FROM alpine\nRUN <<EOF\necho hello\nEOF\n"
-		lines := strings.SplitAfter(input, "\n")
-		result, err := parser.Parse(strings.NewReader(input))
-		require.NoError(t, err)
-
-		root := newNode(result.AST, lines)
-		runNode := root.children[1]
-		content, ok := runNode.heredocs(nil)
-		assert.True(t, ok)
-		assert.Contains(t, content, "echo hello")
-		assert.Contains(t, content, "EOF")
-	})
+func TestHeredocs(t *testing.T) {
+	n := firstNonFromNode(t, "FROM alpine\nRUN <<EOF cat - <<END\necho hello\nEOF\nx\nEND\n")
+	assert.Equal(t, "<<EOF cat - <<END\necho hello\nEOF\nx\nEND\n", n.heredocs())
+	assert.Equal(t, "<<EOF cat - <<END\necho hi\nEOF\nx\nEND\n", n.heredocsWithScript("echo hi\n"))
 }
 
 func TestFormatNodeUnknownCommand(t *testing.T) {
@@ -521,6 +470,8 @@ func TestHasIgnoreComment(t *testing.T) {
 		{"with tab", []string{"\t# dockerfmt-ignore\n"}, true},
 		{"no newline", []string{"# dockerfmt-ignore"}, true},
 		{"among other comments", []string{"# a comment\n", "# dockerfmt-ignore\n"}, true},
+		{"followed by a blank line", []string{"# dockerfmt-ignore\n", "\n"}, true},
+		{"not the last comment", []string{"# dockerfmt-ignore\n", "# a comment\n"}, false},
 		{"not present", []string{"# a comment\n", "# another\n"}, false},
 		{"partial match", []string{"# dockerfmt-ignore this\n"}, false},
 		{"empty", []string{}, false},
@@ -535,13 +486,13 @@ func TestHasIgnoreComment(t *testing.T) {
 }
 
 func TestIgnoreDirective(t *testing.T) {
-	input := strings.SplitAfter("FROM    scratch\n# dockerfmt-ignore\nRUN   echo   hello\nRUN   echo   world\n", "\n")
-	output := FormatFileLines(input, defaultConfig)
+	output := mustFormat(t, "FROM    scratch\n# dockerfmt-ignore\nRUN   echo   hello\nRUN   echo   world\n", defaultConfig)
 	expected := "FROM scratch\n# dockerfmt-ignore\nRUN   echo   hello\nRUN echo world\n"
 	assert.Equal(t, expected, output)
 }
 
-// firstRunNode parses input and returns the node for its first RUN.
+// firstNonFromNode parses input and returns its first instruction other
+// than FROM.
 func firstNonFromNode(t *testing.T, input string) *node {
 	t.Helper()
 	lines := strings.SplitAfter(input, "\n")
@@ -586,7 +537,7 @@ func TestScanFlagsRegion(t *testing.T) {
 		{"comment and separator between flags", "FROM a\nRUN --mount=type=cache,target=/a \\\n  # c\n  \\\n  --network=host \\\n  echo\n",
 			[]flagItem{f("--mount=type=cache,target=/a"), c("# c"), sep, f("--network=host")}, "echo\n", false, true},
 		{"comment after last flag belongs to content", "FROM a\nRUN --network=host \\\n  # c\n  echo\n",
-			[]flagItem{f("--network=host")}, "# c\n  echo\n", false, true},
+			[]flagItem{f("--network=host")}, "\\\n  # c\n  echo\n", false, true},
 		{"flag glued to the next line", "FROM a\nRUN --network=ho\\\nst echo\n", nil, "", false, false},
 	}
 	for _, tt := range tests {
@@ -648,6 +599,18 @@ func TestRegressions(t *testing.T) {
 			"FROM a\nRUN echo a&#\\\necho b\\\n#\n echo c\n"},
 		{"dangling escape", "FROM a\nRUN  echo a\\\\\\\necho b\n", "FROM a\nRUN  echo a\\\\\\\necho b\n"},
 		{"vertical tab inside a word", "FROM a\nRUN  echo a\vb\n", "FROM a\nRUN  echo a\vb\n"},
+		{"comment on the directive line is shell code", "FROM a\nRUN # c \\\n  echo hi\n", "FROM a\nRUN # c \\\n  echo hi\n"},
+		{"backquotes are left alone", "FROM a\nRUN  echo \"`echo \\\"hi\\\"`\"\n", "FROM a\nRUN  echo \"`echo \\\"hi\\\"`\"\n"},
+		{"stage built on a PowerShell stage", "FROM a AS base\nSHELL [\"pwsh\", \"-Command\"]\nFROM base\nRUN  Write-Host   x\n",
+			"FROM a AS base\nSHELL [\"pwsh\", \"-Command\"]\nFROM base\nRUN  Write-Host   x\n"},
+		{"stage built on a POSIX stage", "FROM a AS Base\nFROM base\nRUN  echo   x\n", "FROM a AS Base\nFROM base\nRUN echo x\n"},
+		{"Windows base image", "FROM mcr.microsoft.com/windows/servercore:ltsc2022\nRUN echo hello   world> C:\\out.txt\n",
+			"FROM mcr.microsoft.com/windows/servercore:ltsc2022\nRUN echo hello   world> C:\\out.txt\n"},
+		{"indented would-be syntax directive", " # syntax=docker/dockerfile:1\nFROM a\n", " # syntax=docker/dockerfile:1\nFROM a\n"},
+		{"blank lines after a comment", "FROM a\n# section\n\n\nRUN b\n", "FROM a\n# section\n\nRUN b\n"},
+		{"ignore comment must be the last comment", "# dockerfmt-ignore\n# other\nFROM   a\n", "# dockerfmt-ignore\n# other\nFROM a\n"},
+		{"chomped heredoc is indented with tabs", "FROM a\nRUN <<-EOF\n\tif true; then\n\t\techo   x\n\tfi\nEOF\n",
+			"FROM a\nRUN <<-EOF\nif true; then\n\techo x\nfi\nEOF\n"},
 		{"stray carriage returns", "FROM a\r\r\nRUN  echo a\r", "FROM a\r\nRUN echo a\r\n"},
 	}
 	for _, tt := range tests {
@@ -658,6 +621,29 @@ func TestRegressions(t *testing.T) {
 			assert.Equal(t, out, mustFormat(t, out, c), "idempotent")
 		})
 	}
+}
+
+func TestBacktickEscapeFlagLayout(t *testing.T) {
+	c := &Config{IndentSize: 4, TrailingNewline: true, OnFallback: func(line int, reason string) {
+		t.Errorf("line %d left unformatted: %s", line, reason)
+	}}
+	for _, tt := range []struct{ input, want string }{
+		{"# escape=`\nFROM a\nRUN --mount=type=cache,target=/x echo hi\n",
+			"# escape=`\nFROM a\nRUN --mount=type=cache,target=/x `\n    echo hi\n"},
+		{"# escape=`\nFROM a\nCOPY --chown=a:b C:\\src\\ C:\\dst\\\n",
+			"# escape=`\nFROM a\nCOPY --chown=a:b C:\\src\\ C:\\dst\\\n"},
+		{"# escape=`\nFROM a\nCOPY --chown=a:b `\n  a b\n",
+			"# escape=`\nFROM a\nCOPY --chown=a:b `\n    a b\n"},
+	} {
+		out := mustFormat(t, tt.input, c)
+		assert.Equal(t, tt.want, out)
+		assert.Equal(t, out, mustFormat(t, out, c), "idempotent")
+	}
+}
+
+func TestIndentSizeTooLarge(t *testing.T) {
+	_, err := Format("FROM a\n", &Config{IndentSize: MaxIndentSize + 1})
+	assert.EqualError(t, err, "indent size 17 is larger than 16")
 }
 
 func TestZeroIndentSizeMeansDefault(t *testing.T) {

@@ -94,12 +94,3 @@ func TestReindentContinuations(t *testing.T) {
 		assert.Equal(t, "A=\"C:\\ `\n  x\" `\n    B=`\"\n", reindentContinuations(raw, 4, '`', true))
 	})
 }
-
-func TestContinuationEscape(t *testing.T) {
-	assert.Equal(t, '\\', continuationEscape("ENV A=1\n"))
-	assert.Equal(t, '\\', continuationEscape("ENV A=1 \\\n  B=2\n"))
-	assert.Equal(t, '`', continuationEscape("ENV A=1 `\n  B=2\n"))
-	assert.Equal(t, '`', continuationEscape("ENV A=1 `  \n  B=2\n"))
-	// A single-line instruction ending in a backtick doesn't use it as escape.
-	assert.Equal(t, '\\', continuationEscape("ENV A=`x`\n"))
-}

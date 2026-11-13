@@ -112,7 +112,7 @@ func splitShellBody(content string) (shellBody, bool) {
 		}
 		trimmed := strings.TrimSpace(line)
 		switch {
-		case strings.HasPrefix(trimmed, "#"):
+		case i > 0 && strings.HasPrefix(trimmed, "#"):
 			// BuildKit drops comment lines inside a continuation.
 			pending = append(pending, pendingLine{trimmed, indentWidth(line)})
 			continue
@@ -147,8 +147,10 @@ func splitShellBody(content string) (shellBody, bool) {
 	if strings.Trim(body.src, " \t\\\n") == "" {
 		return shellBody{}, false
 	}
-	if strings.ContainsAny(body.src, "\v\f\r") {
-		// mvdan/sh reads these as blanks; the shell doesn't.
+	if strings.ContainsAny(body.src, "\v\f\r`") {
+		// mvdan/sh reads "\v", "\f" and "\r" as blanks, which the shell
+		// doesn't, and prints backquotes as $(...) without undoing the
+		// escapes inside them.
 		return shellBody{}, false
 	}
 	return body, true
@@ -195,12 +197,14 @@ func isEmptyContinuation(lines []string, i int) bool {
 	return next != "" && (next[0] == ' ' || next[0] == '\t')
 }
 
-func shellPrinter(c *Config) *syntax.Printer {
+// shellPrinter returns a printer that indents by indent spaces, or with tabs
+// if indent is 0.
+func shellPrinter(c *Config, indent uint) *syntax.Printer {
 	return syntax.NewPrinter(
 		syntax.Minify(false),
 		syntax.SingleLine(false),
 		syntax.SpaceRedirects(c.SpaceRedirects),
-		syntax.Indent(c.IndentSize),
+		syntax.Indent(indent),
 		syntax.BinaryNextLine(true),
 	)
 }
@@ -218,7 +222,7 @@ func printShell(src string, c *Config) (string, bool) {
 		return "", false
 	}
 	var buf bytes.Buffer
-	if err := shellPrinter(c).Print(&buf, f); err != nil {
+	if err := shellPrinter(c, c.IndentSize).Print(&buf, f); err != nil {
 		return "", false
 	}
 	out := buf.String()
@@ -475,15 +479,23 @@ func startsWithOperator(line string) bool {
 }
 
 // formatScript formats the body of a heredoc that the shell runs as a
-// script. Comments are real shell comments here. The body is returned
+// script. Comments are real shell comments here. With tabs, which a "<<-"
+// heredoc strips, the script is indented with tabs. The body is returned
 // unchanged if it doesn't parse.
-func formatScript(body string, c *Config) string {
+func formatScript(body string, c *Config, tabs bool) string {
+	if strings.ContainsAny(body, "\v\f`") {
+		return body // see splitShellBody
+	}
 	f, err := parseShell(body)
 	if err != nil {
 		return body
 	}
 	var buf bytes.Buffer
-	if err := shellPrinter(c).Print(&buf, f); err != nil {
+	indent := c.IndentSize
+	if tabs {
+		indent = 0
+	}
+	if err := shellPrinter(c, indent).Print(&buf, f); err != nil {
 		return body
 	}
 	return buf.String()

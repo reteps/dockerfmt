@@ -161,3 +161,25 @@ func mustFormat(t *testing.T, input string, c *Config) string {
 	require.NoError(t, err)
 	return out
 }
+
+func TestEquivalentExpansion(t *testing.T) {
+	for _, tt := range []struct {
+		original, formatted string
+		want                bool
+	}{
+		{"ENV B=${A:+x}\n", "ENV B=x\n", false},
+		{"ENV B=${A:-x}\n", "ENV B=$A\n", false},
+		{"ENV B=${A:?required}\n", "ENV B=$A\n", false},
+		{"ENV B=${A:?required}\n", "ENV   B=${A:?required}\n", true},
+	} {
+		got, reason := equivalentSource(t, tt.original, tt.formatted, defaultContext())
+		assert.Equal(t, tt.want, got, "%q vs %q: %s", tt.original, tt.formatted, reason)
+	}
+}
+
+func TestEquivalentBackquotes(t *testing.T) {
+	// Inside double-quoted backquotes, \" is unescaped before the command
+	// runs; inside $(...) it isn't.
+	got, _ := equivalentSource(t, "RUN echo \"`echo \\\"hi\\\"`\"\n", "RUN echo \"$(echo \\\"hi\\\")\"\n", defaultContext())
+	assert.False(t, got)
+}

@@ -23,7 +23,7 @@ func FuzzFormat(f *testing.F) {
 	f.Add("FROM a\r\nENV A=\"x \\\r\ny\"\r\n", uint(4), false)
 
 	f.Fuzz(func(t *testing.T, input string, indent uint, spaceRedirects bool) {
-		c := &Config{IndentSize: indent % 9, TrailingNewline: true, SpaceRedirects: spaceRedirects}
+		c := &Config{IndentSize: indent % (MaxIndentSize + 1), TrailingNewline: true, SpaceRedirects: spaceRedirects}
 		out, err := Format(input, c)
 		if err != nil {
 			return

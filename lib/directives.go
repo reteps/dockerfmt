@@ -58,12 +58,12 @@ func formatRun(n *node, c *Config) string {
 	case len(n.Heredocs) > 0:
 		// Only a heredoc the shell runs as a script is shell; one fed to
 		// another program is data.
-		var script *string
 		if isShellScriptHeredoc(n.Node, ctx) && ctx.formatsShell() {
-			s := formatScript(n.Heredocs[0].Content, c)
-			script = &s
+			h := n.Heredocs[0]
+			content = n.heredocsWithScript(formatScript(h.Content, c, h.Chomp))
+		} else {
+			content = n.heredocs()
 		}
-		content, _ = n.heredocs(script)
 	case n.Attributes["json"]:
 		if n.hasCommentLines() {
 			return n.source
@@ -79,9 +79,9 @@ func formatRun(n *node, c *Config) string {
 	}
 
 	if region.hasLines() {
-		return n.keyword() + " " + withFlagLines(&region, content, c)
+		return n.keyword() + " " + withFlagLines(&region, content, c, ctx.escape)
 	}
-	return n.keyword() + " " + withFlags(region.flags(), content, c)
+	return n.keyword() + " " + withFlags(region.flags(), content, c, ctx.escape)
 }
 
 // formatCmd formats CMD, ENTRYPOINT and SHELL.
@@ -96,7 +96,7 @@ func formatCmd(n *node, c *Config) string {
 		}
 		// BuildKit decides what is JSON: an argument list it can't decode,
 		// like ["a",], is shell form and must stay that way.
-		return n.keyword() + " " + withFlags(region.flags(), marshalJSONStringArray(n.args())+"\n", c)
+		return n.keyword() + " " + withFlags(region.flags(), marshalJSONStringArray(n.args())+"\n", c, n.context().escape)
 	}
 	content := region.content
 	if strings.TrimSpace(content) == "" {
@@ -105,7 +105,7 @@ func formatCmd(n *node, c *Config) string {
 	if n.context().formatsShell() {
 		content = formatShellBody(content, c)
 	}
-	return n.keyword() + " " + withFlags(region.flags(), content, c)
+	return n.keyword() + " " + withFlags(region.flags(), content, c, n.context().escape)
 }
 
 // bareInstruction formats an instruction that has no arguments after its
@@ -130,7 +130,7 @@ func formatEnv(n *node, c *Config) string {
 	if !ok {
 		return n.source
 	}
-	return n.keyword() + " " + reindentContinuations(content, c.IndentSize, continuationEscape(n.source), true)
+	return n.keyword() + " " + reindentContinuations(content, c.IndentSize, n.context().escape, true)
 }
 
 // formatLegacyEnv rewrites "ENV key value" as "ENV key=value". Everything after
@@ -158,26 +158,11 @@ func isQuotedWord(s string) bool {
 // formatWords formats instructions whose arguments are words (ARG, LABEL,
 // USER, ...), keeping their layout and re-indenting continuation lines.
 func formatWords(n *node, c *Config) string {
-	if heredoc, ok := n.heredocs(nil); ok {
-		return indentFollowingLines(n.keyword()+" "+heredoc, c.IndentSize)
-	}
 	content, ok := n.content()
 	if !ok {
 		return n.keyword() + "\n"
 	}
-	return n.keyword() + " " + reindentContinuations(content, c.IndentSize, continuationEscape(n.source), false)
-}
-
-// indentFollowingLines indents every line after the first by indentSize spaces.
-func indentFollowingLines(s string, indentSize uint) string {
-	lines := strings.SplitAfter(s, "\n")
-	indent := strings.Repeat(" ", int(indentSize))
-	for i := 1; i < len(lines); i++ {
-		if lines[i] != "" {
-			lines[i] = indent + strings.TrimLeft(lines[i], " \t")
-		}
-	}
-	return strings.Join(lines, "")
+	return n.keyword() + " " + reindentContinuations(content, c.IndentSize, n.context().escape, false)
 }
 
 // multilineMode says how a space-separated instruction written across
@@ -202,13 +187,14 @@ func spaceSeparated(mode multilineMode) directiveFormatter {
 			return n.source
 		}
 		flags := region.flags()
-		if heredoc, ok := n.heredocs(nil); ok {
-			return n.keyword() + " " + layoutFlags(flags, heredoc, c, false)
+		escape := n.context().escape
+		if len(n.Heredocs) > 0 {
+			return n.keyword() + " " + layoutFlags(flags, n.heredocs(), c, escape, false)
 		}
 
 		sep := " "
 		if mode == argsOnOwnLines && n.multiline() {
-			sep = " \\\n" + c.indent()
+			sep = " " + string(escape) + "\n" + c.indent()
 		}
 		args := n.args()
 		var content string
@@ -228,7 +214,7 @@ func spaceSeparated(mode multilineMode) directiveFormatter {
 			return bareInstruction(n.keyword(), flags)
 		}
 		onOwnLines := mode == flagsOnOwnLines && (n.multiline() || hasMountFlag(flags))
-		return n.keyword() + " " + layoutFlags(flags, content, c, onOwnLines) + "\n"
+		return n.keyword() + " " + layoutFlags(flags, content, c, escape, onOwnLines) + "\n"
 	}
 }
 

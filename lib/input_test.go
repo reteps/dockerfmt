@@ -12,7 +12,11 @@ import (
 func crlf(s string) string { return strings.ReplaceAll(s, "\n", "\r\n") }
 
 func formatString(s string) string {
-	return FormatFileLines(strings.SplitAfter(s, "\n"), defaultConfig)
+	out, err := Format(s, defaultConfig)
+	if err != nil {
+		panic(err)
+	}
+	return out
 }
 
 func TestFormatPreservesCRLF(t *testing.T) {
@@ -77,7 +81,7 @@ func TestFormatMixedLineEndings(t *testing.T) {
 func TestFormatCRLFTrailingNewline(t *testing.T) {
 	c := *defaultConfig
 	c.TrailingNewline = false
-	assert.Equal(t, "FROM a\r\nRUN x", FormatFileLines([]string{"FROM a\r\n", "RUN x\r\n"}, &c))
+	assert.Equal(t, "FROM a\r\nRUN x", mustFormat(t, "FROM a\r\nRUN x\r\n", &c))
 }
 
 func TestUsesCRLF(t *testing.T) {

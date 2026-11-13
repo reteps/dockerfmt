@@ -164,25 +164,25 @@ func reindentContinuations(raw string, indentSize uint, escape rune, trimRight b
 	b.Grow(len(raw))
 	for i, cl := range scanContinuations(raw, escape) {
 		text := cl.text
-		if trimRight {
+		if trimRight && !createsContinuation(text, text[:cl.keep], escape) {
 			text = text[:cl.keep]
 		}
 		switch {
 		case i == 0:
-			text = strings.TrimLeft(text, " \t")
+			text = trimIndent(text)
 		case cl.start == startDropped:
-			if trimmed := strings.TrimLeft(text, " \t"); trimmed != "" {
+			if trimmed := trimIndent(text); trimmed != "" {
 				text = indent + trimmed
 			} else {
 				text = ""
 			}
 		case cl.start == startAfterSpace:
-			text = indent + strings.TrimLeft(text, " \t")
+			text = indent + trimIndent(text)
 		case cl.start == startAfterWord:
 			// Leading whitespace separates this line from the previous
 			// word; re-indenting must keep some, and must not add any.
-			if indent != "" && strings.TrimLeft(text, " \t") != text {
-				text = indent + strings.TrimLeft(text, " \t")
+			if indent != "" && trimIndent(text) != text {
+				text = indent + trimIndent(text)
 			}
 		case cl.start == startInQuote:
 			// Part of a quoted value: keep as written.
@@ -195,15 +195,17 @@ func reindentContinuations(raw string, indentSize uint, escape rune, trimRight b
 	return b.String()
 }
 
-// continuationEscape returns the escape character an instruction uses, given
-// its source. The escape character is also the line continuation character,
-// so a multi-line instruction's first line ends in it. A single-line
-// instruction has no continuation lines to re-indent, so the default is
-// fine there.
-func continuationEscape(src string) rune {
-	first, rest, _ := strings.Cut(src, "\n")
-	if rest != "" && strings.HasSuffix(strings.TrimRight(first, " \t\r"), "`") {
-		return '`'
-	}
-	return '\\'
+// createsContinuation reports whether trimming line to trimmed would make it
+// end in a line continuation: BuildKit only counts spaces and tabs after the
+// escape character, and other whitespace, such as "\r", ends the line.
+func createsContinuation(line, trimmed string, escape rune) bool {
+	_, was := isContinuation(line, escape)
+	_, is := isContinuation(trimmed, escape)
+	return is && !was
+}
+
+// trimIndent removes leading whitespace. BuildKit splits words on any
+// Unicode whitespace, so all of it is indentation.
+func trimIndent(s string) string {
+	return strings.TrimLeftFunc(s, unicode.IsSpace)
 }

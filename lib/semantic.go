@@ -63,6 +63,11 @@ func equivalent(original, formatted *parser.Node, ctx instrContext) (ok bool, re
 // checked when the input mixes line endings: BuildKit keeps the "\r" of a
 // "\r\n" in heredoc bodies and quoted values.
 func sameFile(a, b string) (same bool, line int) {
+	defer func() {
+		if recover() != nil {
+			same, line = false, 1
+		}
+	}()
 	ka, la, errA := fileKeys(a)
 	kb, _, errB := fileKeys(b)
 	if errA != nil || errB != nil {
@@ -107,12 +112,30 @@ func fileKeys(content string) (keys []string, lines []int, err error) {
 
 // semanticKey describes what BuildKit does with instruction n, such that two
 // instructions get the same key iff they behave the same.
+//
+// Words are expanded twice, with every variable set and with every variable
+// unset, so that forms like ${A:-x} and ${A:+x} differ from what they expand
+// to in either case.
 func semanticKey(n *parser.Node, ctx instrContext) (string, error) {
+	set, err := semanticKeyIn(n, ctx, fakeEnv{})
+	if err != nil {
+		return "", err
+	}
+	unset, err := semanticKeyIn(n, ctx, fakeEnv{unset: true})
+	if err != nil {
+		// ${A:?message} fails when A is unset; that is part of what the
+		// instruction does, not a sign it is invalid.
+		unset = "error: " + err.Error()
+	}
+	return set + "\n" + unset, nil
+}
+
+func semanticKeyIn(n *parser.Node, ctx instrContext, env fakeEnv) (string, error) {
 	v, err := instructions.ParseInstruction(n)
 	if err != nil {
 		return "", err
 	}
-	exp := expander(ctx.escape)
+	exp := expander(ctx.escape, env)
 
 	switch c := v.(type) {
 	case *instructions.Stage:
@@ -167,9 +190,8 @@ func semanticKey(n *parser.Node, ctx instrContext) (string, error) {
 		if isShellScriptHeredoc(n, ctx) {
 			c.Files[0].Data = canonicalShell(c.Files[0].Data)
 		}
-		flags := slices.Clone(n.Flags)
-		slices.Sort(flags)
-		return fmt.Sprintf("RUN flags=%q %s", flags, mustJSON(c)), nil
+		// The order of flags can matter (overlapping mounts), so it is kept.
+		return fmt.Sprintf("RUN flags=%q %s", n.Flags, mustJSON(c)), nil
 	case *instructions.CmdCommand:
 		canonCmdLine(&c.ShellDependantCmdLine)
 	case *instructions.EntrypointCommand:
@@ -187,16 +209,22 @@ func labelKey(pairs []string) string {
 }
 
 // fakeEnv resolves every variable to a placeholder, so that expansion shows
-// in a word's expanded form and "$X" never equals a literal "X".
-type fakeEnv struct{}
+// in a word's expanded form and "$X" never equals a literal "X". With unset,
+// every variable is unset instead.
+type fakeEnv struct{ unset bool }
 
-func (fakeEnv) Get(k string) (string, bool) { return "\x00" + k + "\x00", true }
-func (fakeEnv) Keys() []string              { return nil }
+func (e fakeEnv) Get(k string) (string, bool) {
+	if e.unset {
+		return "", false
+	}
+	return "\x00" + k + "\x00", true
+}
+func (fakeEnv) Keys() []string { return nil }
 
-func expander(escape rune) instructions.SingleWordExpander {
+func expander(escape rune, env fakeEnv) instructions.SingleWordExpander {
 	lex := shell.NewLex(escape)
 	return func(word string) (string, error) {
-		r, _, err := lex.ProcessWord(word, fakeEnv{})
+		r, _, err := lex.ProcessWord(word, env)
 		return r, err
 	}
 }
@@ -213,7 +241,9 @@ func canonicalShell(s string) string {
 		prefix = "crlf:"
 		s = strings.ReplaceAll(s, "\r\n", "\n")
 	}
-	if strings.ContainsAny(s, "\v\f\r") {
+	if strings.ContainsAny(s, "\v\f\r`") {
+		// mvdan/sh also prints backquotes as $(...) without undoing the
+		// escapes inside them, which changes the command.
 		return "unparsed:" + prefix + s
 	}
 	return prefix + printCanonical(s)
@@ -231,10 +261,12 @@ func printCanonical(s string) string {
 	return strings.TrimSpace(b.String())
 }
 
+// mustJSON marshals v, one of BuildKit's instruction types, which hold only
+// strings, numbers, booleans and slices of them.
 func mustJSON(v any) string {
 	b, err := json.Marshal(v)
 	if err != nil {
-		return fmt.Sprintf("unmarshalable(%v)", err)
+		panic(fmt.Sprintf("marshaling %T: %v", v, err))
 	}
 	return string(b)
 }

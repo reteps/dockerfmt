@@ -16,8 +16,12 @@ func TestSplitShellBody(t *testing.T) {
 		{anchor: start, text: "\\"},
 	}, body.inserts)
 
-	_, ok = splitShellBody("# only a comment")
-	assert.False(t, ok)
+	// On the directive line, a comment is shell code: BuildKit drops only
+	// comment lines inside a continuation.
+	body, ok = splitShellBody("# c \\\n  echo hi")
+	assert.True(t, ok)
+	assert.Equal(t, "# c \\\n  echo hi\n", body.src)
+	assert.Empty(t, body.inserts)
 }
 
 func TestFormatShellBodyCommentPlacement(t *testing.T) {

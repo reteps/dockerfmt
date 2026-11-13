@@ -29,7 +29,7 @@ type flagItemKind int
 const (
 	flagItemFlag flagItemKind = iota
 	flagItemComment
-	flagItemSeparator // a line holding only "\"
+	flagItemSeparator // a line holding only the escape character
 )
 
 // flags returns the flags as written, followed by "--" if there was one.
@@ -95,8 +95,10 @@ func scanFlagLines(n *node) (r flagsRegion, ok bool) {
 			switch trimmed := strings.TrimSpace(body); {
 			case strings.HasPrefix(strings.TrimSpace(text), "#"):
 				if read == len(n.Flags) {
-					// A comment after the flags belongs to the content.
-					r.content = strings.TrimLeft(strings.Join(lines[li:], ""), " \t")
+					// A comment after the flags belongs to the content. It
+					// is on a continuation line, which the content starts
+					// with, as content after the keyword does.
+					r.content = string(escape) + "\n" + strings.Join(lines[li:], "")
 					return r, true
 				}
 				r.items = append(r.items, flagItem{strings.TrimSpace(text), flagItemComment})
@@ -180,56 +182,61 @@ func gluesToNext(line string, next []string) bool {
 
 // withFlags puts flags before content. Each flag goes on its own continuation
 // line if any of them is a --mount flag, which tend to be long.
-func withFlags(flags []string, content string, c *Config) string {
-	return layoutFlags(flags, content, c, hasMountFlag(flags))
+func withFlags(flags []string, content string, c *Config, escape rune) string {
+	return layoutFlags(flags, content, c, escape, hasMountFlag(flags))
 }
 
 // layoutFlags puts flags before content, either on one line or each on its
 // own continuation line.
-func layoutFlags(flags []string, content string, c *Config, onOwnLines bool) string {
+func layoutFlags(flags []string, content string, c *Config, escape rune, onOwnLines bool) string {
 	if len(flags) == 0 {
 		return content
 	}
 	if !onOwnLines {
 		return strings.Join(flags, " ") + " " + content
 	}
-	indent := c.indent()
+	next := " " + string(escape) + "\n" + c.indent()
 	var b strings.Builder
 	for _, flag := range flags {
-		b.WriteString(flag + " \\\n" + indent)
+		b.WriteString(flag + next)
 	}
-	b.WriteString(trimLeadingContinuation(content))
+	b.WriteString(trimLeadingContinuation(content, escape))
 	return b.String()
 }
 
 // withFlagLines lays out a flags region that has comment or separator lines:
 // each flag, comment and separator goes on its own line.
-func withFlagLines(r *flagsRegion, content string, c *Config) string {
+func withFlagLines(r *flagsRegion, content string, c *Config, escape rune) string {
 	indent := c.indent()
+	esc := string(escape)
 	var b strings.Builder
 	if r.items[0].kind != flagItemFlag {
 		// A comment or separator can't share the keyword's line.
-		b.WriteString("\\\n" + indent)
+		b.WriteString(esc + "\n" + indent)
 	}
 	for _, item := range r.items {
-		b.WriteString(item.text)
-		if item.kind == flagItemFlag {
-			b.WriteString(" \\")
+		switch item.kind {
+		case flagItemFlag:
+			b.WriteString(item.text + " " + esc)
+		case flagItemSeparator:
+			b.WriteString(esc)
+		default:
+			b.WriteString(item.text)
 		}
 		b.WriteString("\n" + indent)
 	}
 	if r.endOfFlags {
 		b.WriteString("-- ")
 	}
-	b.WriteString(trimLeadingContinuation(content))
+	b.WriteString(trimLeadingContinuation(content, escape))
 	return b.String()
 }
 
-// trimLeadingContinuation drops a leading "\" continuation and the indentation
+// trimLeadingContinuation drops a leading continuation and the indentation
 // after it. Formatted shell content starts with one when its first line is a
-// comment; after a flag line, which already ends in "\", it would be doubled.
-func trimLeadingContinuation(content string) string {
-	if rest, ok := strings.CutPrefix(content, "\\\n"); ok {
+// comment; after a flag line, which already ends in one, it would be doubled.
+func trimLeadingContinuation(content string, escape rune) string {
+	if rest, ok := strings.CutPrefix(content, string(escape)+"\n"); ok {
 		return strings.TrimLeft(rest, " \t")
 	}
 	return content

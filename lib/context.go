@@ -11,9 +11,17 @@ import (
 type instrContext struct {
 	// escape is the escape character, set by a "# escape=" parser directive.
 	escape rune
-	// posixShell is false after a SHELL instruction selects a shell that isn't
-	// POSIX sh compatible (PowerShell, cmd), until the next FROM.
+	// posixShell is false where shell-form commands run in a shell that
+	// isn't POSIX sh compatible (PowerShell, cmd): after a SHELL instruction
+	// that selects one, or in a stage based on a Windows image or on a stage
+	// that was using one.
 	posixShell bool
+	// stage is the lower-case name of the current build stage, if it has
+	// one.
+	stage string
+	// stageShells records, for each named stage so far, whether it ended
+	// with a POSIX shell. A stage built on another inherits its shell.
+	stageShells map[string]bool
 }
 
 func defaultContext() instrContext {
@@ -30,12 +38,51 @@ func (ctx instrContext) formatsShell() bool {
 func (ctx *instrContext) update(n *parser.Node) {
 	switch strings.ToUpper(n.Value) {
 	case "FROM":
-		ctx.posixShell = true
+		ctx.startStage(n)
 	case "SHELL":
 		if n.Next != nil {
 			ctx.posixShell = isPOSIXShell(n.Next.Value)
 		}
 	}
+	if ctx.stage != "" {
+		ctx.stageShells[ctx.stage] = ctx.posixShell
+	}
+}
+
+func (ctx *instrContext) startStage(from *parser.Node) {
+	ctx.posixShell, ctx.stage = true, ""
+	if from.Next == nil {
+		return
+	}
+	base := strings.ToLower(from.Next.Value)
+	if posix, ok := ctx.stageShells[base]; ok {
+		ctx.posixShell = posix
+	} else if isWindowsImage(base, from.Flags) {
+		// Windows images default to cmd.
+		ctx.posixShell = false
+	}
+	if as := from.Next.Next; as != nil && strings.EqualFold(as.Value, "AS") && as.Next != nil {
+		ctx.stage = strings.ToLower(as.Next.Value)
+		if ctx.stageShells == nil {
+			ctx.stageShells = make(map[string]bool)
+		}
+	}
+}
+
+// isWindowsImage reports whether a FROM with the lower-case image name base
+// and flags builds on Windows, as far as can be told without pulling it.
+func isWindowsImage(base string, flags []string) bool {
+	for _, f := range flags {
+		if strings.HasPrefix(strings.ToLower(f), "--platform=windows") {
+			return true
+		}
+	}
+	for _, s := range []string{"mcr.microsoft.com/windows", "servercore", "nanoserver", "mcr.microsoft.com/dotnet/framework"} {
+		if strings.Contains(base, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // isPOSIXShell reports whether exe names a POSIX sh compatible shell.
