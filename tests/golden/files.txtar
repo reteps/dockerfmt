@@ -154,8 +154,8 @@ EXPOSE 2015
 
 FROM foobar
 RUN ls
-LABEL foo=bar   
-HEALTHCHECK NONE   
+LABEL foo=bar
+HEALTHCHECK NONE
 CMD ls
 COPY . .
 ADD . .

@@ -48,6 +48,16 @@ the build:
   continued instructions are removed (BuildKit ignores them, and will reject
   them in a future release). Lines holding only `\` are kept.
 
+### Formatting
+
+- `HEALTHCHECK` is formatted: flags and `CMD`/`NONE` are normalized, the
+  command is formatted like `CMD`'s, and `CMD` stays on its own line when
+  written that way.
+- Words in `ENV`, `LABEL`, `ARG`, `VOLUME`, `USER` and `STOPSIGNAL` are
+  separated by single spaces, trailing whitespace is removed, and a space goes
+  before a line continuation that ends a word. `VOLUME`'s JSON form is
+  normalized.
+
 ### Fixes
 
 - Quoted flag values (`--chown="my user"`) kept their quotes; `--` ending the

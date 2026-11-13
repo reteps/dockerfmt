@@ -427,3 +427,29 @@ ARG NGINX_CONF=nginx.conf
 COPY $NGINX_CONF /etc/nginx/conf.d/nginx.conf
 COPY $PROJECT_DIR /app
 CMD mkdir --parents /var/log/nginx && nginx -g "daemon off;"
+-- spacing --
+FROM a
+ENV A=1     B="x   y"   C=a\ \ b
+ENV D=1\
+    E=2
+ENV F=x\
+y
+LABEL a=b    c="d e"
+ARG X=1    Y=2
+VOLUME /data   /logs
+VOLUME [ "/data" ,"/x" ]
+USER  me  
+STOPSIGNAL   SIGTERM  
+-- want --
+FROM a
+ENV A=1 B="x   y" C=a\ \ b
+ENV D=1 \
+    E=2
+ENV F=x\
+y
+LABEL a=b c="d e"
+ARG X=1 Y=2
+VOLUME /data /logs
+VOLUME ["/data", "/x"]
+USER me
+STOPSIGNAL SIGTERM

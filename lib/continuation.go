@@ -52,6 +52,12 @@ type continuationLine struct {
 	// follows it is whitespace BuildKit ignores (after a line continuation,
 	// or between words at the end of the instruction).
 	keep int
+	// gaps are the byte ranges of the whitespace between words within the
+	// line, not counting its indentation; a gap before a line continuation
+	// is the last.
+	gaps [][2]int
+	// continues reports whether the line ends in a line continuation.
+	continues bool
 }
 
 // isContinuation reports whether line (without its "\n") ends in a line
@@ -121,6 +127,8 @@ func scanContinuations(raw string, escape rune) []continuationLine {
 				cont = true
 			}
 		}
+		cl.continues = cont
+		gapStart, inWord := -1, false
 		for pos, ch := range segment {
 			sep := false
 			switch {
@@ -142,6 +150,17 @@ func scanContinuations(raw string, escape rune) []continuationLine {
 			if !sep && !cont {
 				cl.keep = pos + utf8.RuneLen(ch)
 			}
+			switch {
+			case sep && inWord && gapStart < 0:
+				gapStart = pos
+			case !sep && gapStart >= 0:
+				cl.gaps = append(cl.gaps, [2]int{gapStart, pos})
+				gapStart = -1
+			}
+			inWord = inWord || !sep
+		}
+		if gapStart >= 0 && cont {
+			cl.gaps = append(cl.gaps, [2]int{gapStart, len(segment)})
 		}
 		if !cont && quote != 0 {
 			// An unterminated quote runs to the end of the instruction, so
@@ -156,16 +175,22 @@ func scanContinuations(raw string, escape rune) []continuationLine {
 // reindentContinuations re-indents the continuation lines of raw, the text
 // after an instruction's keyword, to indentSize spaces, and trims the first
 // line's leading whitespace. Lines that start inside a quoted value, or in
-// the middle of a word, keep their leading whitespace as written. With
-// trimRight, whitespace that BuildKit ignores at the end of lines is removed.
-func reindentContinuations(raw string, indentSize uint, escape rune, trimRight bool) string {
+// the middle of a word, keep their leading whitespace as written.
+//
+// With words, for instructions whose arguments BuildKit splits into words on
+// whitespace outside quotes (ENV, LABEL, ARG, ...), the whitespace between
+// words becomes a single space, a space goes before each line continuation
+// that ends a word, and whitespace BuildKit ignores at the end of lines is
+// removed.
+func reindentContinuations(raw string, indentSize uint, escape rune, words bool) string {
 	indent := strings.Repeat(" ", int(indentSize))
+	lines := scanContinuations(raw, escape)
 	var b strings.Builder
 	b.Grow(len(raw))
-	for i, cl := range scanContinuations(raw, escape) {
+	for i, cl := range lines {
 		text := cl.text
-		if trimRight && !createsContinuation(text, text[:cl.keep], escape) {
-			text = text[:cl.keep]
+		if words {
+			text = wordLine(cl, nextStartsAfterGap(lines[i+1:]), escape)
 		}
 		switch {
 		case i == 0:
@@ -195,6 +220,42 @@ func reindentContinuations(raw string, indentSize uint, escape rune, trimRight b
 		}
 	}
 	return b.String()
+}
+
+// wordLine returns the text of cl with each gap between words made a single
+// space and the whitespace BuildKit ignores at its end removed. If the line
+// ends in a word and a continuation, and the next line starts with separating
+// whitespace (nextGap), a space is put before the continuation.
+func wordLine(cl continuationLine, nextGap bool, escape rune) string {
+	text := cl.text
+	if !createsContinuation(text, text[:cl.keep], escape) {
+		text = text[:cl.keep]
+	}
+	if cl.start == startDropped {
+		return text
+	}
+	if end := len(text) - utf8.RuneLen(escape); cl.continues && nextGap && end > 0 {
+		if last, _ := utf8.DecodeLastRuneInString(text[:end]); !unicode.IsSpace(last) {
+			text = text[:end] + " " + text[end:]
+		}
+	}
+	for i := len(cl.gaps) - 1; i >= 0; i-- {
+		g := cl.gaps[i]
+		text = text[:g[0]] + " " + text[g[1]:]
+	}
+	return text
+}
+
+// nextStartsAfterGap reports whether the first of lines that BuildKit keeps
+// starts with whitespace that separates it from the word before it.
+func nextStartsAfterGap(lines []continuationLine) bool {
+	for _, cl := range lines {
+		if cl.start == startDropped {
+			continue
+		}
+		return cl.start == startAfterWord && trimIndent(cl.text) != cl.text
+	}
+	return false
 }
 
 // createsContinuation reports whether trimming line to trimmed would make it

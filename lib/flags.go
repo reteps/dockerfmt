@@ -17,6 +17,9 @@ type flagsRegion struct {
 	endOfFlags bool
 	// content is the source after the region. Its first line is trimmed.
 	content string
+	// contentOnOwnLine reports that content starts on a line after the last
+	// flag.
+	contentOnOwnLine bool
 }
 
 type flagItem struct {
@@ -125,6 +128,7 @@ func scanFlagLines(n *node) (r flagsRegion, ok bool) {
 					continue
 				}
 				r.content = text[pos:] + strings.Join(lines[li:], "")[len(text):]
+				r.contentOnOwnLine = li > 0 && pos == len(text)-len(trimIndent(text))
 				return r, true
 			}
 			if !strings.HasPrefix(word, "--") || end == len(body) && continues && gluesToNext(text, lines[li+1:]) {

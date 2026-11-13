@@ -1,0 +1,43 @@
+HEALTHCHECK.
+-- cases --
+# flags, type and shell command
+FROM a
+healthcheck   --interval=5m   --timeout=3s   cmd   curl -f http://localhost/ ||   exit 1
+
+# NONE
+FROM a
+HEALTHCHECK none
+
+# JSON form
+FROM a
+HEALTHCHECK CMD ["curl" , "-f",  "http://x"]
+
+# CMD on its own line after the flags
+FROM a
+HEALTHCHECK --interval=30s --timeout=3s \
+  CMD curl -f http://localhost/ || exit 1
+
+# in ONBUILD
+FROM a
+ONBUILD HEALTHCHECK CMD   true
+-- want --
+# flags, type and shell command
+FROM a
+HEALTHCHECK --interval=5m --timeout=3s CMD curl -f http://localhost/ || exit 1
+
+# NONE
+FROM a
+HEALTHCHECK NONE
+
+# JSON form
+FROM a
+HEALTHCHECK CMD ["curl", "-f", "http://x"]
+
+# CMD on its own line after the flags
+FROM a
+HEALTHCHECK --interval=30s --timeout=3s \
+    CMD curl -f http://localhost/ || exit 1
+
+# in ONBUILD
+FROM a
+ONBUILD HEALTHCHECK CMD true

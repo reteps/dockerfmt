@@ -24,7 +24,7 @@ func init() {
 		command.Env:         formatEnv,
 		command.Expose:      spaceSeparated(argsOnOwnLines, lowerExposeProtocols),
 		command.From:        spaceSeparated(singleLine, upperFromAs),
-		command.Healthcheck: formatWords,
+		command.Healthcheck: formatHealthcheck,
 		command.Label:       formatWords,
 		command.Maintainer:  formatMaintainer,
 		command.Onbuild:     formatOnbuild,
@@ -156,13 +156,49 @@ func isQuotedWord(s string) bool {
 }
 
 // formatWords formats instructions whose arguments are words (ARG, LABEL,
-// USER, ...), keeping their layout and re-indenting continuation lines.
+// USER, ...), keeping their line breaks, re-indenting continuation lines and
+// separating words by single spaces.
 func formatWords(n *node, c *Config) string {
+	if n.Attributes["json"] && !n.hasCommentLines() {
+		// VOLUME's JSON form.
+		return n.keyword() + " " + marshalJSONStringArray(n.args()) + "\n"
+	}
 	content, ok := n.content()
 	if !ok {
 		return n.keyword() + "\n"
 	}
-	return n.keyword() + " " + reindentContinuations(content, c.IndentSize, n.context().escape, false)
+	return n.keyword() + " " + reindentContinuations(content, c.IndentSize, n.context().escape, true)
+}
+
+// formatHealthcheck formats HEALTHCHECK [flags] CMD command, whose command is
+// formatted as CMD's is, and HEALTHCHECK NONE.
+func formatHealthcheck(n *node, c *Config) string {
+	region, ok := scanFlagsRegion(n)
+	if !ok || n.next == nil || n.hasCommentLines() {
+		return n.source
+	}
+	content := region.content
+	end := wordEnd(content, 0, n.context().escape)
+	kind, body := strings.ToUpper(content[:end]), strings.TrimLeft(content[end:], " \t")
+	switch {
+	case kind == "NONE" && strings.TrimSpace(body) == "":
+		content = "NONE\n"
+	case kind != "CMD" || strings.TrimSpace(body) == "":
+		return n.source
+	case n.Attributes["json"]:
+		content = "CMD " + marshalJSONStringArray(n.args()[1:]) + "\n"
+	case n.context().formatsShell():
+		content = "CMD " + trimLeadingContinuation(formatShellBody(body, c), n.context().escape)
+	default:
+		content = "CMD " + body
+	}
+	flags := region.flags()
+	if region.contentOnOwnLine && len(flags) > 0 {
+		// Keep CMD on its own line, as it is usually written when there
+		// are several flags.
+		return n.keyword() + " " + strings.Join(flags, " ") + " " + string(n.context().escape) + "\n" + c.indent() + content
+	}
+	return n.keyword() + " " + layoutFlags(flags, content, c, n.context().escape, false)
 }
 
 // multilineMode says how a space-separated instruction written across
