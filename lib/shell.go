@@ -333,9 +333,26 @@ func continueStatements(src string, srcFile *syntax.File, out, indent string) (s
 
 	// The printer indents nested lines relative to the top-level
 	// statements, which it puts at the start of a line; after the first,
-	// those follow a continuation, so every line gets one more level. A line
+	// those follow a continuation, so they and their lines get one more
+	// level. So do the lines of the first statement if it is a block, whose
+	// closing "fi" or "done" would otherwise be at the start of a line; the
+	// continuation lines of a command chain already have their level. A line
 	// inside a quoted string is part of the string, and is kept as written.
 	printed := strings.Split(body, "\n")
+	firstEnd := int(outFile.Stmts[0].End().Offset())
+	firstIsBlock := false
+	for i, offset := 1, len(printed[0])+1; i < len(printed) && offset < firstEnd; i++ {
+		if printed[i] != "" && trimIndent(printed[i]) == printed[i] {
+			firstIsBlock = true
+		}
+		offset += len(printed[i]) + 1
+	}
+	levelFor := func(lineStart int) string {
+		if lineStart < firstEnd && !firstIsBlock {
+			return ""
+		}
+		return indent
+	}
 	lines := slices.Clone(printed) // as they will be written
 	stmtIndent := indent           // of the line the current statement starts on
 	var b strings.Builder
@@ -359,12 +376,12 @@ func continueStatements(src string, srcFile *syntax.File, out, indent string) (s
 				// images write it, lines up with the statement.
 				lines[i+1] = stmtIndent + trimIndent(next)
 			default:
-				lines[i+1] = indent + next
+				lines[i+1] = levelFor(offset) + next
 			}
 			b.WriteString("\n")
 			continue
 		}
-		lines[i+1] = indent + next
+		lines[i+1] = levelFor(offset) + next
 		stmtIndent = lines[i+1][:len(lines[i+1])-len(trimIndent(lines[i+1]))]
 		// These need no separator before them.
 		closes := strings.HasPrefix(trimIndent(next), ")") || strings.HasPrefix(trimIndent(next), ";")

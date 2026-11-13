@@ -106,3 +106,29 @@ RUN set -eux; \
     echo "a \
   b"; \
     true
+-- command chain containing a block --
+FROM a
+RUN set -x \
+    && apkArch="$(cat /etc/apk/arch)" \
+    && case "$apkArch" in \
+        x86_64) \
+            echo x \
+            ;; \
+        *) \
+            echo other \
+            ;; \
+    esac \
+    && echo done
+-- want --
+FROM a
+RUN set -x \
+    && apkArch="$(cat /etc/apk/arch)" \
+    && case "$apkArch" in \
+        x86_64) \
+            echo x \
+            ;; \
+        *) \
+            echo other \
+            ;; \
+    esac \
+    && echo done
