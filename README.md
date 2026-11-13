@@ -255,3 +255,5 @@ The hook runs `dockerfmt --write --newline --space-redirects` by default. Settin
 - Input must be UTF-8 (a UTF-8 byte order mark is kept). Other encodings, such as the UTF-16 that Windows PowerShell's `>` writes by default, are rejected with an error, as are files BuildKit can't parse; dockerfmt then exits non-zero and leaves the file unchanged.
 
 Contributions welcome — please file issues for bugs or feature requests.
+
+Formatting is tested with golden files in [`tests/golden`](tests/golden), one [txtar](https://pkg.go.dev/golang.org/x/tools/txtar) archive per area: each input is followed by `want`, what it must format to. Each one is also checked for idempotency, with CRLF line endings and without a final newline, and for instructions left unformatted. To add a case, append it to the area's `cases` input and `want` under a `# <description>` comment.

@@ -1,0 +1,63 @@
+JSON (exec) form arguments.
+-- cases --
+# CMD JSON form adds spaces
+FROM alpine
+CMD ["ls","-la"]
+
+# ENTRYPOINT JSON form
+FROM alpine
+ENTRYPOINT ["nginx"]
+
+# RUN JSON form adds spaces
+FROM alpine
+RUN ["echo","hello"]
+
+# end of flags before JSON
+FROM a
+CMD --doit=true -- [ "a" ]
+
+# CMD JSON form keeps its flags
+FROM a
+CMD --doit [ "a", "b" ]
+
+# SHELL directive
+FROM alpine
+SHELL ["/bin/bash", "-c"]
+-- want --
+# CMD JSON form adds spaces
+FROM alpine
+CMD ["ls", "-la"]
+
+# ENTRYPOINT JSON form
+FROM alpine
+ENTRYPOINT ["nginx"]
+
+# RUN JSON form adds spaces
+FROM alpine
+RUN ["echo", "hello"]
+
+# end of flags before JSON
+FROM a
+CMD --doit=true -- ["a"]
+
+# CMD JSON form keeps its flags
+FROM a
+CMD --doit ["a", "b"]
+
+# SHELL directive
+FROM alpine
+SHELL ["/bin/bash", "-c"]
+-- invalid-json --
+# https://github.com/reteps/dockerfmt/issues/79
+FROM scratch
+CMD ["a",]
+ENTRYPOINT [not json]
+CMD ["ok", "x"]
+RUN ["a",]
+-- want --
+# https://github.com/reteps/dockerfmt/issues/79
+FROM scratch
+CMD ["a",]
+ENTRYPOINT [not json]
+CMD ["ok", "x"]
+RUN ["a",]

@@ -1,0 +1,54 @@
+ONBUILD.
+-- cases --
+# ONBUILD COPY
+FROM alpine
+ONBUILD COPY . /app
+-- want --
+# ONBUILD COPY
+FROM alpine
+ONBUILD COPY . /app
+-- onbuild --
+# syntax=docker/dockerfile:1.11
+FROM alpine AS             baseimage
+ONBUILD COPY --from=build /usr/bin/app                       /app
+ONBUILD RUN --mount=from=config,target=/opt/appconfig ...
+-- want --
+# syntax=docker/dockerfile:1.11
+FROM alpine AS baseimage
+ONBUILD COPY --from=build /usr/bin/app /app
+ONBUILD RUN --mount=from=config,target=/opt/appconfig \
+    ...
+-- arg-env --
+FROM alpine
+ONBUiLD arG
+onbuild enV
+
+
+-- want --
+FROM alpine
+ONBUILD ARG
+ONBUILD ENV
+-- blank-lines --
+FROM alpine
+
+ONBUILD ARG FOO=bar
+
+RUN echo $FOO
+
+ONBUILD ENV BAR=baz
+
+ONBUILD LABEL foo=bar
+
+RUN echo done
+-- want --
+FROM alpine
+
+ONBUILD ARG FOO=bar
+
+RUN echo $FOO
+
+ONBUILD ENV BAR=baz
+
+ONBUILD LABEL foo=bar
+
+RUN echo done

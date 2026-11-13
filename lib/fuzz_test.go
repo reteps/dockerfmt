@@ -1,10 +1,11 @@
 package lib
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/tools/txtar"
 )
 
 // FuzzFormat checks properties that hold for every input Format accepts:
@@ -13,10 +14,14 @@ import (
 // Format enforces the latter too; this also catches instructions merging,
 // splitting or disappearing at the file level.
 func FuzzFormat(f *testing.F) {
-	seeds, _ := filepath.Glob(filepath.Join("..", "tests", "in", "*.dockerfile"))
-	for _, name := range seeds {
-		if b, err := os.ReadFile(name); err == nil {
-			f.Add(string(b), uint(4), false)
+	archives, _ := filepath.Glob(filepath.Join("..", "tests", "golden", "*.txtar"))
+	for _, name := range archives {
+		a, err := txtar.ParseFile(name)
+		if err != nil {
+			f.Fatal(err)
+		}
+		for _, file := range a.Files {
+			f.Add(string(file.Data), uint(4), false)
 		}
 	}
 	f.Add("FROM a\nRUN echo a \\\n  # c\n  && echo b\n", uint(2), true)

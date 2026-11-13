@@ -1,0 +1,21 @@
+FROM and build stages.
+-- cases --
+# FROM basic
+from  alpine
+
+# FROM with tag
+FROM nginx:latest
+
+# FROM AS takes the case of FROM
+from a as b
+FROM c As d
+-- want --
+# FROM basic
+FROM alpine
+
+# FROM with tag
+FROM nginx:latest
+
+# FROM AS takes the case of FROM
+FROM a AS b
+FROM c AS d

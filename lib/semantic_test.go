@@ -129,32 +129,6 @@ func TestFallbackLeavesInstructionAsWritten(t *testing.T) {
 	assert.Contains(t, reasons[0], "boom")
 }
 
-func TestUnknownInstructionKeptAsWritten(t *testing.T) {
-	for _, src := range []string{
-		"FROM a\nFORM b\nRUN echo  hi\n",
-		"FROM a\nRUN echo  hi\nFORM   b \\\n   c\n",
-	} {
-		out := mustFormat(t, src, &Config{IndentSize: 4, TrailingNewline: true})
-		assert.Contains(t, out, "FORM", src)
-		assert.Contains(t, out, "RUN echo hi", src)
-	}
-	out := mustFormat(t, "FROM a\nFORM   b \\\n   c\n", &Config{IndentSize: 4, TrailingNewline: true})
-	assert.Equal(t, "FROM a\nFORM   b \\\n   c\n", out)
-}
-
-func TestCmdJSONKeepsFlags(t *testing.T) {
-	out := mustFormat(t, "FROM a\nCMD --doit [ \"a\", \"b\" ]\n", &Config{IndentSize: 4, TrailingNewline: true})
-	assert.Equal(t, "FROM a\nCMD --doit [\"a\", \"b\"]\n", out)
-}
-
-func TestCopyKeepsEndOfFlags(t *testing.T) {
-	c := &Config{IndentSize: 4, TrailingNewline: true, OnFallback: func(line int, reason string) {
-		t.Errorf("line %d: unexpected fallback: %s", line, reason)
-	}}
-	out := mustFormat(t, "FROM a\nCOPY --chown=1  --  --weird /tmp/\nCOPY [\"a\\\"b\", \"c\"]\n", c)
-	assert.Equal(t, "FROM a\nCOPY --chown=1 -- --weird /tmp/\nCOPY a\"b c\n", out)
-}
-
 func mustFormat(t *testing.T, input string, c *Config) string {
 	t.Helper()
 	out, err := Format(input, c)

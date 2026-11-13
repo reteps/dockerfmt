@@ -1,0 +1,10 @@
+Continuation lines indented by 8 spaces.
+indent: 8
+-- cases --
+FROM alpine
+RUN echo a \
+  && echo b
+-- want --
+FROM alpine
+RUN echo a \
+        && echo b

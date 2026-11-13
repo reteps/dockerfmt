@@ -1,0 +1,105 @@
+COPY and ADD.
+-- cases --
+# COPY normalizes whitespace
+FROM alpine
+COPY  .   /app
+
+# quoted flag value keeps its quotes
+FROM a
+COPY --chown="my user"  a b
+
+# comment among COPY arguments is kept
+FROM a
+COPY --chown=me \
+  # why
+  a b
+
+# end of flags without flags
+FROM a
+COPY -- foo /tmp/
+
+# COPY keeps end of flags
+FROM a
+COPY --chown=1  --  --weird /tmp/
+COPY ["a\"b", "c"]
+-- want --
+# COPY normalizes whitespace
+FROM alpine
+COPY . /app
+
+# quoted flag value keeps its quotes
+FROM a
+COPY --chown="my user" a b
+
+# comment among COPY arguments is kept
+FROM a
+COPY --chown=me \
+  # why
+  a b
+
+# end of flags without flags
+FROM a
+COPY -- foo /tmp/
+
+# COPY keeps end of flags
+FROM a
+COPY --chown=1 -- --weird /tmp/
+COPY a"b c
+-- copy --
+FROM scratch
+COPY --exclude=nginx-default.conf \
+  --exclude=zap-scan-automation-framework.yml \
+  --exclude=renovate.json5 \
+  --exclude=compose.yml \
+  . .
+COPY --chown=user:group ./single-line /dest
+ADD --keep-git-dir \
+  ./ /data/src
+-- want --
+FROM scratch
+COPY --exclude=nginx-default.conf \
+    --exclude=zap-scan-automation-framework.yml \
+    --exclude=renovate.json5 \
+    --exclude=compose.yml \
+    . .
+COPY --chown=user:group ./single-line /dest
+ADD --keep-git-dir \
+    ./ /data/src
+-- json-paths --
+# https://github.com/reteps/dockerfmt/issues/71
+FROM alpine
+COPY ["my file.txt", "/app dir/"]
+ADD ["src dir", "/opt/x y/"]
+COPY ["a", "b/"]
+COPY --chown=1:1 ["a b", "c"]
+-- want --
+# https://github.com/reteps/dockerfmt/issues/71
+FROM alpine
+COPY ["my file.txt", "/app dir/"]
+ADD ["src dir", "/opt/x y/"]
+COPY a b/
+COPY --chown=1:1 ["a b", "c"]
+-- flags --
+# https://github.com/jessfraz/dockfmt/issues/23
+FROM --platform=linux/arm64 debian
+
+RUN --network=host apt-get install vim
+RUN --security echo "test"
+COPY --chown=my-user:my-group --chmod=644 ./config.conf /data/config.conf
+COPY --link ./another-file /data/linked-file
+ADD --keep-git-dir ./ /data/src
+RUN --mount=type=bind,source=requirements.lock,target=requirements.lock \
+  --mount=type=ssh \
+  pip install -r requirements.lock
+-- want --
+# https://github.com/jessfraz/dockfmt/issues/23
+FROM --platform=linux/arm64 debian
+
+RUN --network=host apt-get install vim
+RUN --security echo "test"
+COPY --chown=my-user:my-group --chmod=644 ./config.conf /data/config.conf
+COPY --link ./another-file /data/linked-file
+ADD --keep-git-dir ./ /data/src
+RUN --mount=type=bind,source=requirements.lock,target=requirements.lock \
+    --mount=type=ssh \
+    pip install -r requirements.lock

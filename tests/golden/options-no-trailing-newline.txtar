@@ -1,0 +1,8 @@
+No newline at the end of the output.
+trailing-newline: false
+-- cases --
+FROM alpine
+RUN echo   hi
+-- want --
+FROM alpine
+RUN echo hi
