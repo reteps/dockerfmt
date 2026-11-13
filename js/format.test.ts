@@ -62,6 +62,11 @@ CMD mkdir --parents /var/log/nginx && nginx -g "daemon off;"
         assert.ok(result.endsWith('\n'))
     })
 
+    it('keeps the trailing newline by default', async () => {
+        assert.equal(await formatDockerfileContents('from a\n', {}), 'FROM a\n')
+        assert.equal(await formatDockerfileContents('from a', {}), 'FROM a')
+    })
+
     it('respects trailingNewline: false', async () => {
         const input = 'FROM alpine'
         const result = await formatDockerfileContents(input, {

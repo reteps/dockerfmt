@@ -1,6 +1,6 @@
 # `@reteps/dockerfmt`
 
-Bindings around the Golang `dockerfmt` tooling. It compiles the Go code to WebAssembly (using standard Go's `GOOS=js GOARCH=wasm` target), which is then used in the JS bindings. Requires Node.js 16 or later.
+Bindings around the Golang `dockerfmt` tooling. It compiles the Go code to WebAssembly (using standard Go's `GOOS=js GOARCH=wasm` target), which is then used in the JS bindings. Requires Node.js 20 or later.
 
 ```js
 import { formatDockerfile } from '@reteps/dockerfmt'
@@ -21,7 +21,7 @@ All options are optional.
 | Option            | Type                                     | Default | Description                                                                                                         |
 | ----------------- | ---------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
 | `indent`          | integer from 1 to 16                     | `4`     | Spaces to indent continuation lines by                                                                              |
-| `trailingNewline` | boolean                                  | `false` | End the output with a newline                                                                                       |
+| `trailingNewline` | boolean                                  | as input | End the output with a newline, or (`false`) without one                                                            |
 | `spaceRedirects`  | boolean                                  | `false` | Put a space after shell redirect operators (`> file`)                                                               |
 | `onFallback`      | `(line: number, reason: string) => void` |         | Called for each instruction left as written because formatting it would have changed its meaning, or failed (a bug) |
 

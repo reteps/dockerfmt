@@ -71,7 +71,8 @@ RUN apt-get update \
 - Converts legacy `ENV` syntax (`ENV key value` → `ENV key=value`)
 - Upgrades deprecated directives (`MAINTAINER` → `LABEL`)
 - Supports heredocs in `RUN` steps
-- Keeps the file's line endings: CRLF files stay CRLF (a file with mixed line endings gets its most common one)
+- Keeps the file's line endings: CRLF files stay CRLF (a file with mixed line endings gets its most common one, unless that would change a heredoc or quoted value)
+- Keeps the trailing newline as it is, unless told otherwise
 - Reads from files or stdin
 - Pre-commit hook support
 - JS/WASM bindings for Node.js ([docs](js/README.md))
@@ -121,7 +122,7 @@ dockerfmt Dockerfile
 # format in place
 dockerfmt -w Dockerfile
 
-# read from stdin
+# read from stdin (also as "-" among other files)
 cat Dockerfile | dockerfmt
 
 # check if already formatted (exits non-zero if not)
@@ -146,10 +147,16 @@ Flags:
   -d, --diff              Print a unified diff of the changes needed (implies --check)
   -h, --help              help for dockerfmt
   -i, --indent uint       Number of spaces to use for indentation (default 4)
-  -n, --newline           End the file with a trailing newline
+  -n, --newline           End the file with a trailing newline (--newline=false: without one)
   -s, --space-redirects   Redirect operators will be followed by a space
   -w, --write             Write the formatted output back to the file(s)
 ```
+
+The output ends with a newline if the input does. `--newline` adds one, and `--newline=false` removes it; `insert_final_newline` in `.editorconfig` does the same.
+
+`--indent` must be between 1 and 16. `--write` can't be combined with `--check` or `--diff`, or used with stdin. It rewrites each file in place, so the file keeps its permissions, owner and hard links; while writing, a backup of the original is kept next to it and restored if the write fails.
+
+Exit status is 1 if any input couldn't be read, parsed or written, or, with `--check` or `--diff`, isn't formatted; otherwise 0.
 
 ## Configuration
 
@@ -162,6 +169,8 @@ dockerfmt reads [EditorConfig](https://editorconfig.org/) files to pick up proje
 | `indent_size`            | `--indent`           | Standard EditorConfig key   |
 | `insert_final_newline`   | `--newline`          | Standard EditorConfig key   |
 | `space_redirects`        | `--space-redirects`  | Custom key (non-standard)   |
+
+Property names are case-insensitive. `indent_size = tab` uses `tab_width`. An invalid value is reported as a warning and ignored.
 
 `.editorconfig` files are looked up from each Dockerfile's own directory upward (stopping at `root = true`), as the EditorConfig spec describes, so a repository-root `.editorconfig` also applies to Dockerfiles in subdirectories such as `docker/Dockerfile`.
 
@@ -180,13 +189,17 @@ insert_final_newline = true
 
 ## Safety
 
-dockerfmt never knowingly changes what a Dockerfile does. After formatting each instruction, it parses the result with BuildKit (the parser `docker build` uses) and compares it with the original: ENV/LABEL/ARG values as BuildKit expands them, COPY/ADD sources and destinations, flags, exec-form arrays, heredoc contents, and shell commands (ignoring layout). If anything differs, or the formatter fails, that instruction is left exactly as written and a warning is printed to stderr:
+dockerfmt never knowingly changes what a Dockerfile does. After formatting each instruction, it parses the result with BuildKit (the parser `docker build` uses) and compares it with the original: ENV/LABEL/ARG values as BuildKit expands them, COPY/ADD sources and destinations, flags, exec-form arrays, heredoc contents, and shell commands (ignoring layout). Formatting the result again must also leave it unchanged. If anything differs, or the formatter fails, that instruction is left exactly as written and a warning is printed to stderr:
 
 ```
 Dockerfile:12: left unformatted: output differs in meaning
 ```
 
-Please [report](https://github.com/reteps/dockerfmt/issues) these warnings; they point at formatter bugs.
+Finally, the whole formatted file is parsed again, as written with its line endings, and compared instruction by instruction with the input. This catches what checking one instruction at a time can't, such as a file with mixed line endings where converting them would change a heredoc. If that check fails, the file is left unchanged.
+
+Please [report](https://github.com/reteps/dockerfmt/issues) these warnings; they point at formatter bugs, except for files with mixed line endings or stray carriage returns.
+
+The formatter is fuzz tested for these properties (`go test ./lib -fuzz FuzzFormat`).
 
 Some content is deliberately left as written:
 

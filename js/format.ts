@@ -3,7 +3,10 @@ import './wasm_exec.js'
 export interface FormatOptions {
     /** Spaces to indent continuation lines by, from 1 to 16. Default: 4. */
     indent?: number
-    /** End the output with a newline. Default: false. */
+    /**
+     * End the output with a newline (true) or without one (false). Default:
+     * as the input does.
+     */
     trailingNewline?: boolean
     /** Put a space after shell redirect operators (`> file`). Default: false. */
     spaceRedirects?: boolean
@@ -28,8 +31,9 @@ const describe = (value: unknown) =>
 const resolveBoolean = (
     options: FormatOptions,
     key: 'trailingNewline' | 'spaceRedirects',
+    fallback: boolean,
 ) => {
-    const value = options[key] ?? false
+    const value = options[key] ?? fallback
     if (typeof value !== 'boolean') {
         throw new TypeError(
             `dockerfmt: options.${key} must be a boolean, got ${describe(value)}`,
@@ -40,6 +44,7 @@ const resolveBoolean = (
 
 const resolveOptions = (
     options: FormatOptions | undefined = {},
+    fileContents: string,
 ): ResolvedOptions => {
     if (typeof options !== 'object' || options === null) {
         throw new TypeError(
@@ -64,8 +69,12 @@ const resolveOptions = (
     }
     return {
         indent,
-        trailingNewline: resolveBoolean(options, 'trailingNewline'),
-        spaceRedirects: resolveBoolean(options, 'spaceRedirects'),
+        trailingNewline: resolveBoolean(
+            options,
+            'trailingNewline',
+            fileContents.endsWith('\n'),
+        ),
+        spaceRedirects: resolveBoolean(options, 'spaceRedirects', false),
         onFallback,
     }
 }
@@ -126,7 +135,7 @@ export const formatDockerfileContents = async (
             `dockerfmt: fileContents must be a string, got ${typeof fileContents}`,
         )
     }
-    const resolved = resolveOptions(options)
+    const resolved = resolveOptions(options, fileContents)
     if (typeof getWasm !== 'function') {
         throw new TypeError('dockerfmt: getWasm must be a function')
     }

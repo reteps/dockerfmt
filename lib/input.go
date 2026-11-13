@@ -35,6 +35,14 @@ func formatContent(content string, c *Config) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if i := strings.Index(out, "\r\n"); i >= 0 {
+		// A "\r" that BuildKit doesn't read as part of a line ending, such as
+		// one followed by a space, now ends a line: it would be read as one.
+		if c.OnFallback != nil {
+			c.OnFallback(lineAt(out, i), "the file has a stray carriage return")
+		}
+		return content, nil
+	}
 	if crlf {
 		out = strings.ReplaceAll(out, "\n", "\r\n")
 	}
