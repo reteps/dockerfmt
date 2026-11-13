@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/moby/buildkit/frontend/dockerfile/parser"
 )
@@ -204,7 +205,7 @@ func formatRecovering(n *node, c *Config) (out string, ok bool, reason string) {
 func hasIgnoreComment(lines []string) bool {
 	for i := len(lines) - 1; i >= 0; i-- {
 		if t := strings.TrimSpace(lines[i]); t != "" {
-			return t == ignoreComment
+			return spaceComment(t) == ignoreComment
 		}
 	}
 	return false
@@ -213,6 +214,19 @@ func hasIgnoreComment(lines []string) bool {
 // reDirective matches a comment that would be a parser directive at the
 // start of a line, like "# syntax=docker/dockerfile:1".
 var reDirective = regexp.MustCompile(`(?i)^#\s*[a-z]+\s*=`)
+
+// spaceComment puts a space after the "#" (or "##"...) starting the comment
+// t, as in "#comment". The comment must go on with a letter or digit, which
+// leaves alone shebangs ("#!"), lines of punctuation ("#####", "#---") and
+// anything that reads as a parser directive or "# check=" ("#key=value").
+func spaceComment(t string) string {
+	body := strings.TrimLeft(t, "#")
+	r, _ := utf8.DecodeRuneInString(body)
+	if body == t || !unicode.IsLetter(r) && !unicode.IsDigit(r) || reDirective.MatchString(t) {
+		return t
+	}
+	return t[:len(t)-len(body)] + " " + body
+}
 
 // formatComments formats the comment and blank lines between instructions:
 // leading and trailing whitespace is trimmed, and runs of blank lines become
@@ -232,6 +246,8 @@ func formatComments(lines []string, first bool) string {
 			blank = false
 			if first && reDirective.MatchString(t) {
 				t = strings.TrimRightFunc(line, unicode.IsSpace)
+			} else {
+				t = spaceComment(t)
 			}
 		}
 		b.WriteString(t)

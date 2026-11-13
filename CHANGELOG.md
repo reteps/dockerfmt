@@ -42,10 +42,13 @@ bugs found by fuzzing and review. Some defaults changed; see below.
 
 ### Build checks
 
-Formatting now fixes these BuildKit build-check warnings, none of which change
-the build:
+Formatting now fixes these BuildKit build-check warnings:
 
 - FromAsCasing: `from a as b` becomes `FROM a AS b`.
+- StageNameCasing: stage names are written in lower case, and so are the
+  references to them in `COPY --from`, `RUN --mount=...,from=` and `FROM`.
+  BuildKit finds a stage ignoring case everywhere except `FROM`, so
+  `FROM Builder` now builds on the stage `builder` as intended.
 - ExposeProtoCasing: `EXPOSE 80/TCP` becomes `EXPOSE 80/tcp`.
 - LegacyKeyValueFormat: `LABEL key value` is rewritten as `LABEL key=value`,
   as `ENV` already was, and so are values with quotes or escapes, whose
@@ -65,6 +68,9 @@ the build:
   the official images, and `if`, `for`, `case` and `{ }` blocks, are
   formatted, with each statement on its own continued line ending in `; \`.
   Statements written on one line stay on one line.
+- Comments get a space after the `#`: `#comment` becomes `# comment`.
+  Parser directives, `# check=` lines, shebangs and banners such as
+  `#####` are left alone. `#dockerfmt-ignore` works too.
 - Indentation with tabs: `--use-tabs`, `indent_style = tab` in EditorConfig,
   or `useTabs` (or `indent: 0`, as prettier-plugin-sh passes) in JS.
 

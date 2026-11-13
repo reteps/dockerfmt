@@ -98,3 +98,37 @@ FROM alpine AS final
 
 # check=skip=all
 FROM alpine
+-- a space after the "#" --
+#syntax=docker/dockerfile:1
+#comment
+##section
+#######
+#---- banner
+FROM a
+RUN apt-get update \
+  #install curl
+  && apt-get install -y curl
+ENV A=1 \
+  #note
+  B=2
+#check=skip=all
+#!/bin/sh is not a shebang here, but looks like one
+#dockerfmt-ignore
+RUN   echo   kept
+-- want --
+#syntax=docker/dockerfile:1
+# comment
+## section
+#######
+#---- banner
+FROM a
+RUN apt-get update \
+    # install curl
+    && apt-get install -y curl
+ENV A=1 \
+    # note
+    B=2
+#check=skip=all
+#!/bin/sh is not a shebang here, but looks like one
+# dockerfmt-ignore
+RUN   echo   kept

@@ -31,6 +31,8 @@ func TestFormatComments(t *testing.T) {
 		{"would-be directive keeps its indentation", []string{" # syntax=docker/dockerfile:1\n"}, true, " # syntax=docker/dockerfile:1\n"},
 		{"would-be directive after the first instruction", []string{" # syntax=x\n"}, false, "# syntax=x\n"},
 		{"ordinary comment before the first instruction", []string{"  # hello\n"}, true, "# hello\n"},
+		{"space after the #", []string{"#a\n", "##b\n"}, false, "# a\n## b\n"},
+		{"banner, shebang and directive kept", []string{"#####\n", "#!/bin/sh\n", "#escape=`\n"}, false, "#####\n#!/bin/sh\n#escape=`\n"},
 	}
 
 	for _, tt := range tests {
@@ -233,6 +235,7 @@ func TestHasIgnoreComment(t *testing.T) {
 		{"not the last comment", []string{"# dockerfmt-ignore\n", "# a comment\n"}, false},
 		{"not present", []string{"# a comment\n", "# another\n"}, false},
 		{"partial match", []string{"# dockerfmt-ignore this\n"}, false},
+		{"without the space", []string{"#dockerfmt-ignore\n"}, true},
 		{"empty", []string{}, false},
 		{"blank lines only", []string{"\n", "\n"}, false},
 	}

@@ -114,7 +114,7 @@ func splitShellBody(content string) (shellBody, bool) {
 		switch {
 		case i > 0 && strings.HasPrefix(trimmed, "#"):
 			// BuildKit drops comment lines inside a continuation.
-			pending = append(pending, pendingLine{trimmed, indentWidth(line)})
+			pending = append(pending, pendingLine{spaceComment(trimmed), indentWidth(line)})
 			continue
 		case i > 0 && trimmed == "":
 			// BuildKit skips blank lines inside a continuation, so they don't

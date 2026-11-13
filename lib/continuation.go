@@ -201,7 +201,7 @@ func reindentContinuations(raw, indent string, escape rune, words bool) string {
 				// (NoEmptyContinuation).
 				continue
 			}
-			text = indent + trimmed
+			text = indent + spaceComment(trimmed)
 		case cl.start == startAfterSpace:
 			text = indent + trimIndent(text)
 		case cl.start == startAfterWord:

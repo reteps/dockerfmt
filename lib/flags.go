@@ -104,7 +104,7 @@ func scanFlagLines(n *node) (r flagsRegion, ok bool) {
 					r.content = string(escape) + "\n" + strings.Join(lines[li:], "")
 					return r, true
 				}
-				r.items = append(r.items, flagItem{strings.TrimSpace(text), flagItemComment})
+				r.items = append(r.items, flagItem{spaceComment(strings.TrimSpace(text)), flagItemComment})
 				continue
 			case strings.TrimSpace(text) == "":
 				continue // blank lines inside a continuation are dropped

@@ -70,7 +70,8 @@ RUN apt-get update \
 - Normalizes whitespace and extra blank lines across all directives
 - Converts legacy `ENV` and `LABEL` syntax (`ENV key value` → `ENV key=value`)
 - Upgrades deprecated directives (`MAINTAINER` → `LABEL`)
-- Fixes what BuildKit's [build checks](https://docs.docker.com/reference/build-checks/) flag where that can't change the build: `AS` in the case of `FROM` (FromAsCasing), lower-case `EXPOSE` protocols (ExposeProtoCasing), no blank lines inside continuations (NoEmptyContinuation), and the two above (LegacyKeyValueFormat, MaintainerDeprecated)
+- Fixes what BuildKit's [build checks](https://docs.docker.com/reference/build-checks/) flag: `AS` in the case of `FROM` (FromAsCasing), lower-case stage names and references to them (StageNameCasing), lower-case `EXPOSE` protocols (ExposeProtoCasing), no blank lines inside continuations (NoEmptyContinuation), and the two above (LegacyKeyValueFormat, MaintainerDeprecated)
+- Puts a space after the `#` of comments (`#comment` → `# comment`), leaving parser directives, shebangs and `#####` banners alone
 - Supports heredocs in `RUN` steps
 - Keeps the file's line endings: CRLF files stay CRLF (a file with mixed line endings gets its most common one, unless that would change a heredoc or quoted value)
 - Keeps the trailing newline as it is, unless told otherwise
@@ -194,7 +195,7 @@ insert_final_newline = true
 
 ## Safety
 
-dockerfmt never knowingly changes what a Dockerfile does. After formatting each instruction, it parses the result with BuildKit (the parser `docker build` uses) and compares it with the original: ENV/LABEL/ARG values as BuildKit expands them, COPY/ADD sources and destinations, flags, exec-form arrays, heredoc contents, and shell commands (ignoring layout). Formatting the result again must also leave it unchanged. If anything differs, or the formatter fails, that instruction is left exactly as written and a warning is printed to stderr:
+Apart from the build-check fixes above, dockerfmt never knowingly changes what a Dockerfile does. After formatting each instruction, it parses the result with BuildKit (the parser `docker build` uses) and compares it with the original: ENV/LABEL/ARG values as BuildKit expands them, COPY/ADD sources and destinations, flags, exec-form arrays, heredoc contents, and shell commands (ignoring layout). Formatting the result again must also leave it unchanged. If anything differs, or the formatter fails, that instruction is left exactly as written and a warning is printed to stderr:
 
 ```
 Dockerfile:12: left unformatted: output differs in meaning
