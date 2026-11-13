@@ -81,16 +81,16 @@ func TestReindentContinuations(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, reindentContinuations(tt.raw, 4, '\\', tt.trimRight))
+			assert.Equal(t, tt.expected, reindentContinuations(tt.raw, "    ", '\\', tt.trimRight))
 		})
 	}
 
 	t.Run("no indentation keeps a separating space", func(t *testing.T) {
-		assert.Equal(t, "A=x\\ \\\n  B=2\n", reindentContinuations("A=x\\ \\\n  B=2\n", 0, '\\', true))
-		assert.Equal(t, "A=1 \\\nB=2\n", reindentContinuations("A=1 \\\n  B=2\n", 0, '\\', true))
+		assert.Equal(t, "A=x\\ \\\n  B=2\n", reindentContinuations("A=x\\ \\\n  B=2\n", "", '\\', true))
+		assert.Equal(t, "A=1 \\\nB=2\n", reindentContinuations("A=1 \\\n  B=2\n", "", '\\', true))
 	})
 	t.Run("backtick escape", func(t *testing.T) {
 		raw := "A=\"C:\\ `\n  x\" `\n      B=`\"\n"
-		assert.Equal(t, "A=\"C:\\ `\n  x\" `\n    B=`\"\n", reindentContinuations(raw, 4, '`', true))
+		assert.Equal(t, "A=\"C:\\ `\n  x\" `\n    B=`\"\n", reindentContinuations(raw, "    ", '`', true))
 	})
 }

@@ -50,6 +50,9 @@ the build:
 
 ### Formatting
 
+- Indentation with tabs: `--use-tabs`, `indent_style = tab` in EditorConfig,
+  or `useTabs` (or `indent: 0`, as prettier-plugin-sh passes) in JS.
+
 - `HEALTHCHECK` is formatted: flags and `CMD`/`NONE` are normalized, the
   command is formatted like `CMD`'s, and `CMD` stays on its own line when
   written that way.

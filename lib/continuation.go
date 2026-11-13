@@ -173,7 +173,7 @@ func scanContinuations(raw string, escape rune) []continuationLine {
 }
 
 // reindentContinuations re-indents the continuation lines of raw, the text
-// after an instruction's keyword, to indentSize spaces, and trims the first
+// after an instruction's keyword, to indent, and trims the first
 // line's leading whitespace. Lines that start inside a quoted value, or in
 // the middle of a word, keep their leading whitespace as written.
 //
@@ -182,8 +182,7 @@ func scanContinuations(raw string, escape rune) []continuationLine {
 // words becomes a single space, a space goes before each line continuation
 // that ends a word, and whitespace BuildKit ignores at the end of lines is
 // removed.
-func reindentContinuations(raw string, indentSize uint, escape rune, words bool) string {
-	indent := strings.Repeat(" ", int(indentSize))
+func reindentContinuations(raw, indent string, escape rune, words bool) string {
 	lines := scanContinuations(raw, escape)
 	var b strings.Builder
 	b.Grow(len(raw))

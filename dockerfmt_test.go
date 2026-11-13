@@ -14,7 +14,8 @@ import (
 
 // TestGolden runs the golden tests in tests/golden, one archive per area.
 // An archive's comment describes it, and may set options for all its tests,
-// one "option: value" per line (indent, space-redirects, trailing-newline).
+// one "option: value" per line (indent, space-redirects, trailing-newline,
+// use-tabs).
 // Its files come in pairs: an input, then "want", what it formats to. Most
 // areas combine their small cases in one input, each under a comment naming
 // it.
@@ -62,6 +63,8 @@ func goldenConfig(comment string) (lib.Config, error) {
 			c.SpaceRedirects, err = strconv.ParseBool(value)
 		case "trailing-newline":
 			c.TrailingNewline, err = strconv.ParseBool(value)
+		case "use-tabs":
+			c.UseTabs, err = strconv.ParseBool(value)
 		}
 		if err != nil {
 			return c, err

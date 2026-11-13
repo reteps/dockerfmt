@@ -25,6 +25,17 @@ func applyEditorConfig(c lib.Config, path string, flags *pflag.FlagSet) (lib.Con
 		return c, []string{"ignoring .editorconfig: " + strings.Join(strings.Fields(err.Error()), " ")}
 	}
 	var warnings []string
+	if style := strings.ToLower(def.Raw["indent_style"]); !flags.Changed("use-tabs") && !flags.Changed("indent") {
+		switch style {
+		case "tab":
+			c.UseTabs = true
+		case "space":
+			c.UseTabs = false
+		case "", editorconfig.UnsetValue:
+		default:
+			warnings = append(warnings, fmt.Sprintf("ignoring .editorconfig setting indent_style = %s: must be tab or space", style))
+		}
+	}
 	if !flags.Changed("indent") {
 		if n, ok, err := editorConfigIndent(def); err != nil {
 			warnings = append(warnings, err.Error())

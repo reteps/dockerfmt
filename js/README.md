@@ -20,7 +20,8 @@ All options are optional.
 
 | Option            | Type                                     | Default | Description                                                                                                         |
 | ----------------- | ---------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
-| `indent`          | integer from 1 to 16                     | `4`     | Spaces to indent continuation lines by                                                                              |
+| `indent`          | integer from 0 to 16                     | `4`     | Spaces to indent continuation lines by; 0 means tabs                                                                |
+| `useTabs`         | boolean                                  | `false` | Indent with tabs instead of spaces                                                                                  |
 | `trailingNewline` | boolean                                  | as input | End the output with a newline, or (`false`) without one                                                            |
 | `spaceRedirects`  | boolean                                  | `false` | Put a space after shell redirect operators (`> file`)                                                               |
 | `onFallback`      | `(line: number, reason: string) => void` |         | Called for each instruction left as written because formatting it would have changed its meaning, or failed (a bug) |

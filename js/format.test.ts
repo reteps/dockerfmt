@@ -76,6 +76,14 @@ CMD mkdir --parents /var/log/nginx && nginx -g "daemon off;"
         assert.ok(!result.endsWith('\n'))
     })
 
+    it('indents with tabs', async () => {
+        const input = 'FROM a\nRUN a \\\n  && b\n'
+        const want = 'FROM a\nRUN a \\\n\t&& b\n'
+        assert.equal(await formatDockerfileContents(input, { useTabs: true }), want)
+        // prettier-plugin-sh passes indent 0 for tabs, as shfmt takes it.
+        assert.equal(await formatDockerfileContents(input, { indent: 0 }), want)
+    })
+
     it('respects indent option', async () => {
         const input = `FROM alpine
 RUN echo a \\
@@ -127,9 +135,9 @@ RUN echo a \\
             [{ indent: '2' }, TypeError, /indent must be an integer/],
             [{ indent: 2.5 }, TypeError, /indent must be an integer/],
             [{ indent: NaN }, TypeError, /indent must be an integer/],
-            [{ indent: 0 }, RangeError, /indent must be from 1 to 16/],
-            [{ indent: -1 }, RangeError, /indent must be from 1 to 16/],
-            [{ indent: 17 }, RangeError, /indent must be from 1 to 16/],
+            [{ indent: -1 }, RangeError, /indent must be from 0 \(tabs\) to 16/],
+            [{ indent: 17 }, RangeError, /indent must be from 0 \(tabs\) to 16/],
+            [{ useTabs: 'yes' }, TypeError, /useTabs must be a boolean/],
             [{ trailingNewline: 1 }, TypeError, /trailingNewline must be a/],
             [{ spaceRedirects: 'no' }, TypeError, /spaceRedirects must be a/],
             [{ onFallback: true }, TypeError, /onFallback must be a function/],

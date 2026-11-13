@@ -14,6 +14,9 @@ type Config struct {
 	// IndentSize is the number of spaces continuation lines are indented by,
 	// at most MaxIndentSize. Zero means DefaultIndentSize.
 	IndentSize uint
+	// UseTabs indents with tabs instead, one per level; IndentSize is then
+	// ignored.
+	UseTabs bool
 	// TrailingNewline ends the output with a newline.
 	TrailingNewline bool
 	// SpaceRedirects puts a space after shell redirect operators ("> file").
@@ -32,8 +35,21 @@ const (
 	MaxIndentSize = 16
 )
 
+// indent returns one level of indentation.
 func (c *Config) indent() string {
+	if c.UseTabs {
+		return "\t"
+	}
 	return strings.Repeat(" ", int(c.IndentSize))
+}
+
+// shellIndent returns the shell printer's indentation setting, in which 0
+// means tabs.
+func (c *Config) shellIndent() uint {
+	if c.UseTabs {
+		return 0
+	}
+	return c.IndentSize
 }
 
 // Format formats the contents of a Dockerfile. It returns an error, and no

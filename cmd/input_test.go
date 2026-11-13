@@ -272,3 +272,10 @@ func TestIsTerminal(t *testing.T) {
 	assert.False(t, isTerminal(devNull), "/dev/null is a character device, not a terminal")
 	assert.False(t, isTerminal(strings.NewReader("")))
 }
+
+func TestCLIUseTabs(t *testing.T) {
+	code, stdout, stderr := cli("FROM a\nRUN a \\\n  && b\n", "--use-tabs")
+	assert.Equal(t, 0, code)
+	assert.Empty(t, stderr)
+	assert.Equal(t, "FROM a\nRUN a \\\n\t&& b\n", stdout)
+}

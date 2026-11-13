@@ -1,0 +1,27 @@
+Indentation with tabs.
+use-tabs: true
+-- cases --
+FROM alpine
+RUN --mount=type=cache,target=/x apt-get update \
+  && apt-get install -y \
+  curl
+ENV A=1 \
+    B=2
+RUN <<EOF
+if true; then
+echo hi
+fi
+EOF
+-- want --
+FROM alpine
+RUN --mount=type=cache,target=/x \
+	apt-get update \
+	&& apt-get install -y \
+		curl
+ENV A=1 \
+	B=2
+RUN <<EOF
+if true; then
+	echo hi
+fi
+EOF

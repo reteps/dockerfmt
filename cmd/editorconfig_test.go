@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -162,4 +163,22 @@ func TestCLIWarnsOnceAboutBrokenEditorConfig(t *testing.T) {
 	code, _, stderr := cli("", "-c", "Dockerfile", "docker/Dockerfile")
 	assert.Equal(t, 0, code)
 	assert.Equal(t, "dockerfmt: warning: ignoring .editorconfig setting indent_size = huge: must be a number from 1 to 16\n", stderr)
+}
+
+func TestEditorConfigIndentStyle(t *testing.T) {
+	for _, tt := range []struct {
+		settings string
+		args     []string
+		want     bool
+	}{
+		{"indent_style = tab", nil, true},
+		{"INDENT_STYLE = Tab", nil, true},
+		{"indent_style = space", []string{"--use-tabs"}, true},
+		{"indent_style = tab", []string{"--indent=2"}, false},
+		{"indent_style = space", nil, false},
+	} {
+		writeProject(t, "root = true\n\n[Dockerfile]\n"+tt.settings+"\n")
+		got := mustApplyEditorConfig(t, lib.Config{IndentSize: 4, UseTabs: slices.Contains(tt.args, "--use-tabs")}, "Dockerfile", parsedFlags(t, tt.args...))
+		assert.Equal(t, tt.want, got.UseTabs, "%s %v", tt.settings, tt.args)
+	}
 }

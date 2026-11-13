@@ -223,7 +223,7 @@ func printShell(src string, c *Config) (string, bool) {
 		return "", false
 	}
 	var buf bytes.Buffer
-	if err := shellPrinter(c, c.IndentSize).Print(&buf, f); err != nil {
+	if err := shellPrinter(c, c.shellIndent()).Print(&buf, f); err != nil {
 		return "", false
 	}
 	out := buf.String()
@@ -488,7 +488,7 @@ func formatScript(body string, c *Config, tabs bool) string {
 		return body
 	}
 	var buf bytes.Buffer
-	indent := c.IndentSize
+	indent := c.shellIndent()
 	if tabs {
 		indent = 0
 	}

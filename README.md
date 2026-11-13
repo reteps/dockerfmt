@@ -150,6 +150,7 @@ Flags:
   -i, --indent uint       Number of spaces to use for indentation (default 4)
   -n, --newline           End the file with a trailing newline (--newline=false: without one)
   -s, --space-redirects   Redirect operators will be followed by a space
+  -t, --use-tabs          Indent with tabs instead of spaces
   -w, --write             Write the formatted output back to the file(s)
 ```
 
@@ -169,6 +170,7 @@ dockerfmt reads [EditorConfig](https://editorconfig.org/) files to pick up proje
 
 | EditorConfig property    | dockerfmt equivalent | Notes                       |
 | ------------------------ | -------------------- | --------------------------- |
+| `indent_style`           | `--use-tabs`         | Standard EditorConfig key   |
 | `indent_size`            | `--indent`           | Standard EditorConfig key   |
 | `insert_final_newline`   | `--newline`          | Standard EditorConfig key   |
 | `space_redirects`        | `--space-redirects`  | Custom key (non-standard)   |

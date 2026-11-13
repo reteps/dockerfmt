@@ -41,11 +41,12 @@ type options struct {
 	write, check, diff bool
 	newline            bool
 	indent             uint
+	useTabs            bool
 	spaceRedirects     bool
 }
 
 func (o *options) config() lib.Config {
-	return lib.Config{IndentSize: o.indent, TrailingNewline: o.newline, SpaceRedirects: o.spaceRedirects}
+	return lib.Config{IndentSize: o.indent, UseTabs: o.useTabs, TrailingNewline: o.newline, SpaceRedirects: o.spaceRedirects}
 }
 
 func (o *options) validate(args []string) error {
@@ -108,6 +109,7 @@ func newRootCmd(status *int) *cobra.Command {
 	flags.BoolVarP(&opts.diff, "diff", "d", false, "Print a unified diff of the changes needed (implies --check)")
 	flags.BoolVarP(&opts.newline, "newline", "n", false, "End the file with a trailing newline (--newline=false: without one)")
 	flags.UintVarP(&opts.indent, "indent", "i", lib.DefaultIndentSize, "Number of spaces to use for indentation")
+	flags.BoolVarP(&opts.useTabs, "use-tabs", "t", false, "Indent with tabs instead of spaces")
 	flags.BoolVarP(&opts.spaceRedirects, "space-redirects", "s", false, "Redirect operators will be followed by a space")
 	_ = root.RegisterFlagCompletionFunc("indent", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return []string{"2", "4", "8"}, cobra.ShellCompDirectiveNoFileComp

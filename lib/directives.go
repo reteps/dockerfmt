@@ -130,7 +130,7 @@ func formatEnv(n *node, c *Config) string {
 	if !ok {
 		return n.source
 	}
-	return n.keyword() + " " + reindentContinuations(content, c.IndentSize, n.context().escape, true)
+	return n.keyword() + " " + reindentContinuations(content, c.indent(), n.context().escape, true)
 }
 
 // formatLegacyEnv rewrites "ENV key value" as "ENV key=value". Everything after
@@ -167,7 +167,7 @@ func formatWords(n *node, c *Config) string {
 	if !ok {
 		return n.keyword() + "\n"
 	}
-	return n.keyword() + " " + reindentContinuations(content, c.IndentSize, n.context().escape, true)
+	return n.keyword() + " " + reindentContinuations(content, c.indent(), n.context().escape, true)
 }
 
 // formatHealthcheck formats HEALTHCHECK [flags] CMD command, whose command is

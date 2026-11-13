@@ -31,6 +31,7 @@ func formatBytes(_ js.Value, args []js.Value) (result any) {
 	opts := args[1]
 	c := &lib.Config{
 		IndentSize:      uint(opts.Get("indent").Int()),
+		UseTabs:         opts.Get("useTabs").Bool(),
 		TrailingNewline: opts.Get("trailingNewline").Bool(),
 		SpaceRedirects:  opts.Get("spaceRedirects").Bool(),
 	}

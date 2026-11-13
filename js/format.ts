@@ -1,8 +1,13 @@
 import './wasm_exec.js'
 
 export interface FormatOptions {
-    /** Spaces to indent continuation lines by, from 1 to 16. Default: 4. */
+    /**
+     * Spaces to indent continuation lines by, from 1 to 16, or 0 for tabs.
+     * Default: 4.
+     */
     indent?: number
+    /** Indent with tabs instead of spaces. Default: false. */
+    useTabs?: boolean
     /**
      * End the output with a newline (true) or without one (false). Default:
      * as the input does.
@@ -30,7 +35,7 @@ const describe = (value: unknown) =>
 
 const resolveBoolean = (
     options: FormatOptions,
-    key: 'trailingNewline' | 'spaceRedirects',
+    key: 'trailingNewline' | 'spaceRedirects' | 'useTabs',
     fallback: boolean,
 ) => {
     const value = options[key] ?? fallback
@@ -57,9 +62,9 @@ const resolveOptions = (
             `dockerfmt: options.indent must be an integer, got ${describe(indent)}`,
         )
     }
-    if (indent < 1 || indent > 16) {
+    if (indent < 0 || indent > 16) {
         throw new RangeError(
-            `dockerfmt: options.indent must be from 1 to 16, got ${indent}`,
+            `dockerfmt: options.indent must be from 0 (tabs) to 16, got ${indent}`,
         )
     }
     if (onFallback !== undefined && typeof onFallback !== 'function') {
@@ -75,6 +80,8 @@ const resolveOptions = (
             fileContents.endsWith('\n'),
         ),
         spaceRedirects: resolveBoolean(options, 'spaceRedirects', false),
+        // shfmt, and so prettier-plugin-sh, use indent 0 for tabs.
+        useTabs: resolveBoolean(options, 'useTabs', false) || indent === 0,
         onFallback,
     }
 }
