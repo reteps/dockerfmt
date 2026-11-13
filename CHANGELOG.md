@@ -20,6 +20,9 @@ bugs found by fuzzing and review. Some defaults changed; see below.
   `Format` returns an error instead of exiting the process.
 - **The default Docker image is based on distroless** and has no shell. Use
   `ghcr.io/reteps/dockerfmt:alpine` where a shell is needed, such as GitLab CI.
+- **Redirects get a space by default** (`> file`), in the CLI and the JS
+  API; `--space-redirects=false` (`spaceRedirects: false`) turns it off. The
+  pre-commit hook no longer needs to pass it.
 - `--indent` must be from 1 to 16, and `--write` can't be combined with
   `--check` or `--diff`.
 - Help is shown only when no files are given and stdin is a terminal; empty

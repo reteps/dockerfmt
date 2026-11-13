@@ -23,7 +23,7 @@ All options are optional.
 | `indent`          | integer from 0 to 16                     | `4`     | Spaces to indent continuation lines by; 0 means tabs                                                                |
 | `useTabs`         | boolean                                  | `false` | Indent with tabs instead of spaces                                                                                  |
 | `trailingNewline` | boolean                                  | as input | End the output with a newline, or (`false`) without one                                                            |
-| `spaceRedirects`  | boolean                                  | `false` | Put a space after shell redirect operators (`> file`)                                                               |
+| `spaceRedirects`  | boolean                                  | `true`  | Put a space after shell redirect operators (`> file`)                                                               |
 | `onFallback`      | `(line: number, reason: string) => void` |         | Called for each instruction left as written because formatting it would have changed its meaning, or failed (a bug) |
 
 An option of the wrong type rejects with a `TypeError`, and an `indent` out of range with a `RangeError`. An error thrown by `onFallback` stops formatting and is passed through as the rejection.

@@ -1,0 +1,8 @@
+No space after redirect operators.
+space-redirects: false
+-- cases --
+FROM alpine
+RUN echo foo >> bar 2>&1 < in
+-- want --
+FROM alpine
+RUN echo foo >>bar 2>&1 <in

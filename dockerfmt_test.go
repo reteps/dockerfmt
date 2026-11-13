@@ -49,7 +49,7 @@ func TestGolden(t *testing.T) {
 // goldenConfig reads the options in an archive's comment. Other lines are
 // its description.
 func goldenConfig(comment string) (lib.Config, error) {
-	c := lib.Config{IndentSize: 4, TrailingNewline: true}
+	c := lib.Config{IndentSize: 4, TrailingNewline: true, SpaceRedirects: true}
 	for _, line := range strings.Split(comment, "\n") {
 		key, value, _ := strings.Cut(line, ":")
 		value = strings.TrimSpace(value)

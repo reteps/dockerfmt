@@ -110,7 +110,7 @@ func newRootCmd(status *int) *cobra.Command {
 	flags.BoolVarP(&opts.newline, "newline", "n", false, "End the file with a trailing newline (--newline=false: without one)")
 	flags.UintVarP(&opts.indent, "indent", "i", lib.DefaultIndentSize, "Number of spaces to use for indentation")
 	flags.BoolVarP(&opts.useTabs, "use-tabs", "t", false, "Indent with tabs instead of spaces")
-	flags.BoolVarP(&opts.spaceRedirects, "space-redirects", "s", false, "Redirect operators will be followed by a space")
+	flags.BoolVarP(&opts.spaceRedirects, "space-redirects", "s", true, "Put a space after redirect operators (--space-redirects=false: none)")
 	_ = root.RegisterFlagCompletionFunc("indent", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return []string{"2", "4", "8"}, cobra.ShellCompDirectiveNoFileComp
 	})

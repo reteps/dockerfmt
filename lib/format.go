@@ -19,7 +19,8 @@ type Config struct {
 	UseTabs bool
 	// TrailingNewline ends the output with a newline.
 	TrailingNewline bool
-	// SpaceRedirects puts a space after shell redirect operators ("> file").
+	// SpaceRedirects puts a space after shell redirect operators ("> file"),
+	// as the CLI and the JS API do by default.
 	SpaceRedirects bool
 	// OnFallback, if set, is called for each instruction left as written
 	// because formatting it would have changed its meaning, or failed. line

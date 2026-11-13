@@ -6,7 +6,6 @@
   args:
     - --write
     - --newline
-    - --space-redirects
   description: Format Dockerfile files
   entry: dockerfmt
   files: (?i)(^|/)[^/]*(container|docker)file[^/]*$

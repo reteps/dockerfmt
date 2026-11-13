@@ -149,7 +149,7 @@ Flags:
   -h, --help              help for dockerfmt
   -i, --indent uint       Number of spaces to use for indentation (default 4)
   -n, --newline           End the file with a trailing newline (--newline=false: without one)
-  -s, --space-redirects   Redirect operators will be followed by a space
+  -s, --space-redirects   Put a space after redirect operators (--space-redirects=false: none) (default true)
   -t, --use-tabs          Indent with tabs instead of spaces
   -w, --write             Write the formatted output back to the file(s)
 ```
@@ -244,7 +244,7 @@ repos:
       - id: dockerfmt
 ```
 
-The hook runs `dockerfmt --write --newline --space-redirects` by default. Setting `args` replaces those defaults, and like any CLI flag, flags passed in `args` take precedence over `.editorconfig`. To let `.editorconfig` control a setting (e.g. `indent_size`), leave the corresponding flag out of `args`.
+The hook runs `dockerfmt --write --newline` by default. Setting `args` replaces those defaults, and like any CLI flag, flags passed in `args` take precedence over `.editorconfig`. To let `.editorconfig` control a setting (e.g. `indent_size`), leave the corresponding flag out of `args`.
 
 ## Limitations
 

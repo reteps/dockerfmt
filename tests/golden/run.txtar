@@ -115,7 +115,7 @@ RUN echo foo >> bar
 -- want --
 RUN ["ls", "-la"]
 
-RUN echo foo >>bar
+RUN echo foo >> bar
 -- run2 --
 RUN apt-get update \
     # Comment here

@@ -13,7 +13,7 @@ export interface FormatOptions {
      * as the input does.
      */
     trailingNewline?: boolean
-    /** Put a space after shell redirect operators (`> file`). Default: false. */
+    /** Put a space after shell redirect operators (`> file`). Default: true. */
     spaceRedirects?: boolean
     /**
      * Called for each instruction left as written because formatting it would
@@ -79,7 +79,7 @@ const resolveOptions = (
             'trailingNewline',
             fileContents.endsWith('\n'),
         ),
-        spaceRedirects: resolveBoolean(options, 'spaceRedirects', false),
+        spaceRedirects: resolveBoolean(options, 'spaceRedirects', true),
         // shfmt, and so prettier-plugin-sh, use indent 0 for tabs.
         useTabs: resolveBoolean(options, 'useTabs', false) || indent === 0,
         onFallback,

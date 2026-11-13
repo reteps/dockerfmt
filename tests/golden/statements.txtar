@@ -77,7 +77,7 @@ RUN if [ -f x ]; then \
 FROM a
 RUN if [ -f x ]; then echo yes; else echo no; fi
 RUN for i in 1 2; do echo $i; done
-RUN { echo a; echo b; } >/f
+RUN { echo a; echo b; } > /f
 
 # for loop over lines
 FROM a
