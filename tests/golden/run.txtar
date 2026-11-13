@@ -700,3 +700,22 @@ FROM a
 RUN --mount=type=cache,target=/a \
         x=`date`; \
         echo $x
+-- arguments of the first command in a chain --
+FROM a
+RUN apt-get update && apt-get install -y \
+    python-numpy \
+    && apt-get clean
+RUN \
+  uv pip install \
+  -e ./homeassistant \
+  && python3 -m compileall \
+  homeassistant/
+-- want --
+FROM a
+RUN apt-get update && apt-get install -y \
+        python-numpy \
+    && apt-get clean
+RUN uv pip install \
+        -e ./homeassistant \
+    && python3 -m compileall \
+        homeassistant/

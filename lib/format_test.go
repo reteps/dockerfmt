@@ -107,11 +107,11 @@ func TestFormatShell(t *testing.T) {
 			"if true; then \\\n        echo a; echo b; fi\n",
 		},
 		{
-			"comment before operator keeps argument indentation",
+			"comment before operator takes its indentation",
 			"apt-get install -y \\\n  curl \\\n  # note\n  && rm -rf x",
 			false,
 			defaultConfig,
-			"apt-get install -y \\\n    curl \\\n    # note\n    && rm -rf x\n",
+			"apt-get install -y \\\n        curl \\\n    # note\n    && rm -rf x\n",
 		},
 		{
 			"comment before operand of trailing operator",

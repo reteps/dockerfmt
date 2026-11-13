@@ -233,7 +233,58 @@ func printShell(src string, c *Config) (string, bool) {
 		// follows with a blank line.
 		return "", false
 	}
-	return continueStatements(src, f, out, c.indent())
+	if out, ok := indentFirstCommand(out, c.indent()); ok {
+		return continueStatements(src, f, out, c.indent())
+	}
+	return "", false
+}
+
+// indentFirstCommand gives the continuation lines of the first command of an
+// operator chain one more level of indentation, as the printer gives those
+// of the commands after an operator:
+//
+//	apt-get update && apt-get install -y \
+//	        curl \
+//	    && rm -rf /var/lib/apt/lists/*
+//
+// Without it, the printer puts "curl" level with "&& rm".
+func indentFirstCommand(out, indent string) (string, bool) {
+	f, err := parseShell(out)
+	if err != nil {
+		return "", false
+	}
+	quoted := quotedRanges(f)
+	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+	// A statement's lines are those continued from its first.
+	for start := 0; start < len(lines); {
+		end := start
+		for end < len(lines)-1 && strings.HasSuffix(strings.TrimRight(lines[end], " \t"), "\\") {
+			end++
+		}
+		first := -1 // the first line starting with an operator
+		for i := start + 1; i <= end && first < 0; i++ {
+			if startsWithOperator(lines[i]) {
+				first = i
+			}
+		}
+		for i := start + 1; i < first; i++ {
+			if !quoted(lineOffset(lines, i) - 1) {
+				lines[i] = indent + lines[i]
+			}
+		}
+		start = end + 1
+	}
+	return strings.Join(lines, "\n") + "\n", true
+}
+
+// lineOffset returns the offset of the start of lines[i] in the text the lines
+// were split from.
+func lineOffset(lines []string, i int) int {
+	n := 0
+	for _, l := range lines[:i] {
+		n += len(l) + 1
+	}
+	return n
 }
 
 // continueStatements turns out, the printed form of src (parsed as srcFile),
