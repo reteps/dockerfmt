@@ -46,9 +46,9 @@ func formatContent(content string, c *Config) (string, error) {
 	if crlf {
 		out = strings.ReplaceAll(out, "\n", "\r\n")
 	}
-	if same, line := sameFile(original, out); !same {
+	if line, reason := sameFile(original, out); reason != "" {
 		if c.OnFallback != nil {
-			c.OnFallback(line, "formatting the file would change what this instruction means (are its line endings mixed?)")
+			c.OnFallback(line, reason)
 		}
 		return content, nil
 	}

@@ -46,7 +46,7 @@ RUN apt-get update && \
 ```dockerfile
 LABEL org.opencontainers.image.authors="me"
 
-FROM node:lts-alpine as builder
+FROM node:lts-alpine AS builder
 
 COPY . /app
 WORKDIR /app

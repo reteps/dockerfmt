@@ -46,7 +46,7 @@ func FuzzFormat(f *testing.F) {
 
 func assertSameInstructions(t *testing.T, input, output string) {
 	t.Helper()
-	if same, line := sameFile(strings.TrimPrefix(input, utf8BOM), strings.TrimPrefix(output, utf8BOM)); !same {
-		t.Fatalf("instruction on line %d changed meaning\ninput:\n%q\noutput:\n%q", line, input, output)
+	if line, reason := sameFile(strings.TrimPrefix(input, utf8BOM), strings.TrimPrefix(output, utf8BOM)); reason != "" {
+		t.Fatalf("line %d: %s\ninput:\n%q\noutput:\n%q", line, reason, input, output)
 	}
 }

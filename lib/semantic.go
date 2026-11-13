@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/moby/buildkit/frontend/dockerfile/instructions"
+	"github.com/moby/buildkit/frontend/dockerfile/linter"
 	"github.com/moby/buildkit/frontend/dockerfile/parser"
 	"github.com/moby/buildkit/frontend/dockerfile/shell"
 	"mvdan.cc/sh/v3/syntax"
@@ -55,33 +56,36 @@ func equivalent(original, formatted *parser.Node, ctx instrContext) (ok bool, re
 }
 
 // sameFile reports whether BuildKit reads the whole files a and b as the same
-// instructions with the same meaning. line is the first line in a of an
-// instruction that differs.
+// instructions with the same meaning. If not, it returns why, and the first
+// line in a of an instruction that differs.
 //
 // Format checks each instruction as it formats it, on input with normalized
 // line endings. This checks the files as written, which differ from what was
 // checked when the input mixes line endings: BuildKit keeps the "\r" of a
 // "\r\n" in heredoc bodies and quoted values.
-func sameFile(a, b string) (same bool, line int) {
+func sameFile(a, b string) (line int, reason string) {
 	defer func() {
-		if recover() != nil {
-			same, line = false, 1
+		if r := recover(); r != nil {
+			line, reason = 1, fmt.Sprintf("checking the formatted file failed: %v", r)
 		}
 	}()
-	ka, la, errA := fileKeys(a)
-	kb, _, errB := fileKeys(b)
-	if errA != nil || errB != nil {
-		return false, 1
+	ka, la, err := fileKeys(a)
+	if err != nil {
+		return 1, fmt.Sprintf("checking the file failed: %v", err)
+	}
+	kb, _, err := fileKeys(b)
+	if err != nil {
+		return 1, fmt.Sprintf("the formatted file doesn't parse: %v", err)
 	}
 	for i := range ka {
 		if i >= len(kb) || ka[i] != kb[i] {
-			return false, la[i]
+			return la[i], "formatting the file would change what this instruction means (are its line endings mixed?)"
 		}
 	}
 	if len(kb) > len(ka) {
-		return false, 1
+		return 1, "the formatted file has more instructions"
 	}
-	return true, 0
+	return 0, ""
 }
 
 // fileKeys returns the semantic key of each instruction of the file content,
@@ -131,7 +135,10 @@ func semanticKey(n *parser.Node, ctx instrContext) (string, error) {
 }
 
 func semanticKeyIn(n *parser.Node, ctx instrContext, env fakeEnv) (string, error) {
-	v, err := instructions.ParseInstruction(n)
+	// ParseInstruction has no linter, and fails on an instruction with a
+	// "# check=" comment above it, which BuildKit merges into the linter's
+	// configuration. This one reports nothing.
+	v, err := instructions.ParseInstructionWithLinter(n, linter.New(&linter.Config{}))
 	if err != nil {
 		return "", err
 	}

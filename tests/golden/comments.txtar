@@ -82,3 +82,19 @@ RUN { echo hello && echo world; }
 # Unescaped semicolons aren't supported
 # dockerfmt-ignore
 RUN echo hello; echo world
+-- check directive comments --
+FROM alpine
+run   echo   hi
+# check=skip=JSONArgsRecommended
+FROM   alpine AS final
+
+# check=skip=all
+from alpine
+-- want --
+FROM alpine
+RUN echo hi
+# check=skip=JSONArgsRecommended
+FROM alpine AS final
+
+# check=skip=all
+FROM alpine
