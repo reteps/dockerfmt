@@ -112,7 +112,7 @@ FROM ubuntu
 
 RUN (cd out && ls)
 
-RUN ls ; ls
+RUN ls; ls
 -- whitespace --
 # https://github.com/reteps/dockerfmt/issues/1#issuecomment-2785329824
 FROM node:lts-alpine          as       builder

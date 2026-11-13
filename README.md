@@ -210,7 +210,6 @@ Some content is deliberately left as written:
 
 - `RUN`/`CMD`/`ENTRYPOINT` bodies after a `SHELL` instruction that selects a non-POSIX shell (PowerShell, `cmd`), until the next `FROM`
 - heredocs fed to another program (`RUN python3 <<EOF`, `RUN <<EOF python3`, or a body with a non-shell shebang), and all `COPY`/`ADD` heredocs
-- shell bodies that the shell printer would split into several statements, such as `a; b`, `{ ...; }` groups, or multi-line `if`/`for`
 - instructions dockerfmt doesn't know
 
 ## Ignoring Directives
@@ -249,7 +248,6 @@ The hook runs `dockerfmt --write --newline --space-redirects` by default. Settin
 
 ## Limitations
 
-- Shell bodies with several statements (`a; b`, `{ ...; }` groups) are left unformatted; see [Safety](#safety).
 - With a `# escape=` parser directive other than backslash, shell-form `RUN`/`CMD`/`ENTRYPOINT` bodies are left unformatted.
 - Shell bodies with backquoted command substitutions are left unformatted, since rewriting them as `$(...)` can change their meaning.
 - A stage's shell is worked out from `SHELL` instructions, from the stage it is built on, and from well-known Windows base images (which default to `cmd`); a stage built on another Windows image, named through a build argument for example, is formatted as POSIX shell. Add a `SHELL` instruction or `# dockerfmt-ignore` there.

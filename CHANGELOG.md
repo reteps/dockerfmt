@@ -54,6 +54,10 @@ the build:
 
 ### Formatting
 
+- Shell bodies with several statements, such as the `set -eux; \` style of
+  the official images, and `if`, `for`, `case` and `{ }` blocks, are
+  formatted, with each statement on its own continued line ending in `; \`.
+  Statements written on one line stay on one line.
 - Indentation with tabs: `--use-tabs`, `indent_style = tab` in EditorConfig,
   or `useTabs` (or `indent: 0`, as prettier-plugin-sh passes) in JS.
 

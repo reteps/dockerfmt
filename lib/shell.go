@@ -214,12 +214,14 @@ func parseShell(src string) (*syntax.File, error) {
 	return syntax.NewParser(syntax.KeepComments(true)).Parse(strings.NewReader(src), "")
 }
 
-// printShell formats src with mvdan/sh. It fails if src doesn't parse, or if
-// the output isn't a single continued line: a bare newline would end the
-// Dockerfile instruction (the printer puts "a; b" on separate lines, for one).
+// printShell formats src with mvdan/sh. The printer puts statements on
+// separate lines (and blocks like if ... fi), but a bare newline would end the
+// Dockerfile instruction, so line breaks between statements become ";"
+// continuations; see continueStatements. It fails if src doesn't parse, or
+// has a construct that needs real line breaks, such as a heredoc.
 func printShell(src string, c *Config) (string, bool) {
 	f, err := parseShell(src)
-	if err != nil || hasInnerComment(f, src) {
+	if err != nil || hasInnerComment(f, src) || hasHeredoc(f) {
 		return "", false
 	}
 	var buf bytes.Buffer
@@ -232,13 +234,203 @@ func printShell(src string, c *Config) (string, bool) {
 		// follows with a blank line.
 		return "", false
 	}
-	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+	return continueStatements(src, f, out, c.indent())
+}
+
+// continueStatements turns out, the printed form of src (parsed as srcFile),
+// into a single continued line. A line break the printer put between two
+// statements that src has on one line is joined back with "; ". Any other
+// line break that doesn't already follow a continuation becomes one, after a
+// ";" where the shell needs a separator there: not after "then", "do",
+// "else", "{", "(", "in", a case pattern or ";;", nor after "&".
+func continueStatements(src string, srcFile *syntax.File, out, indent string) (string, bool) {
+	body := strings.TrimSuffix(out, "\n")
+	if !hasStatementBreak(body) {
+		return out, true
+	}
+	outFile, err := parseShell(out)
+	if err != nil {
+		return "", false
+	}
+	srcPos, outPos := syntaxPositions(srcFile), syntaxPositions(outFile)
+	if len(srcPos) != len(outPos) {
+		return "", false
+	}
+	// Token starts in out, in order, with their line in src.
+	type token struct{ out, srcLine int }
+	tokens := make([]token, len(outPos))
+	for i, p := range outPos {
+		tokens[i] = token{p, strings.Count(src[:srcPos[i]], "\n")}
+	}
+	slices.SortFunc(tokens, func(a, b token) int { return a.out - b.out })
+	lastBefore := func(at int) (int, bool) { // src line of the last token starting before at
+		i, _ := slices.BinarySearchFunc(tokens, at, func(t token, at int) int { return t.out - at })
+		if i == 0 {
+			return 0, false
+		}
+		return tokens[i-1].srcLine, true
+	}
+	startingAt := func(at int) (int, bool) { // src line of the token starting at at
+		i, found := slices.BinarySearchFunc(tokens, at, func(t token, at int) int { return t.out - at })
+		if !found {
+			return 0, false
+		}
+		return tokens[i].srcLine, true
+	}
+	openers := blockOpeners(outFile, out)
+	quoted := quotedRanges(outFile)
+
+	// The printer indents nested lines relative to the top-level
+	// statements, which it puts at the start of a line; after the first,
+	// those follow a continuation, so every line gets one more level. A line
+	// inside a quoted string is part of the string, and is kept as written.
+	printed := strings.Split(body, "\n")
+	lines := slices.Clone(printed) // as they will be written
+	stmtIndent := indent           // of the line the current statement starts on
+	var b strings.Builder
+	offset := 0
+	for i, line := range printed {
+		b.WriteString(lines[i])
+		end := offset + len(line)
+		offset = end + 1
+		if i == len(lines)-1 {
+			break
+		}
+		next := printed[i+1]
+		trimmed := strings.TrimRight(line, " \t")
+		if strings.HasSuffix(trimmed, "\\") {
+			// Already continued: in a && chain, or in a quoted string,
+			// whose next line is part of the string.
+			switch {
+			case quoted(end):
+			case strings.HasPrefix(trimIndent(next), ";") && !strings.HasPrefix(trimIndent(next), ";;"):
+				// A statement ended on a line of its own, as the official
+				// images write it, lines up with the statement.
+				lines[i+1] = stmtIndent + trimIndent(next)
+			default:
+				lines[i+1] = indent + next
+			}
+			b.WriteString("\n")
+			continue
+		}
+		lines[i+1] = indent + next
+		stmtIndent = lines[i+1][:len(lines[i+1])-len(trimIndent(lines[i+1]))]
+		closes := strings.HasPrefix(trimIndent(next), ")") // needs no separator before it
+		if !closes && !openers[end-(len(line)-len(trimmed))] && !strings.HasSuffix(trimmed, "&") && !strings.HasSuffix(trimmed, ";") {
+			b.WriteString(";")
+		}
+		before, ok1 := lastBefore(end)
+		after, ok2 := startingAt(offset + len(next) - len(trimIndent(next)))
+		if ok1 && ok2 && before == after {
+			lines[i+1] = trimIndent(next)
+			b.WriteString(" ")
+			continue
+		}
+		b.WriteString(" \\\n")
+	}
+	return b.String() + "\n", true
+}
+
+// quotedRanges returns a function reporting whether an offset in the printed
+// file f is inside a quoted string, and not in code within one, such as a
+// command substitution.
+func quotedRanges(f *syntax.File) func(int) bool {
+	type span struct {
+		start, end int
+		quoted     bool
+	}
+	var spans []span
+	syntax.Walk(f, func(node syntax.Node) bool {
+		switch node.(type) {
+		case *syntax.SglQuoted, *syntax.DblQuoted:
+			spans = append(spans, span{int(node.Pos().Offset()), int(node.End().Offset()), true})
+		case *syntax.CmdSubst, *syntax.ArithmExp, *syntax.ParamExp:
+			spans = append(spans, span{int(node.Pos().Offset()), int(node.End().Offset()), false})
+		}
+		return true
+	})
+	return func(at int) bool {
+		var innermost *span
+		for i, s := range spans {
+			if at > s.start && at < s.end && (innermost == nil || s.end-s.start < innermost.end-innermost.start) {
+				innermost = &spans[i]
+			}
+		}
+		return innermost != nil && innermost.quoted
+	}
+}
+
+// hasStatementBreak reports whether a line of the printed body ends other than
+// in a continuation, where the printer put a line break between statements.
+func hasStatementBreak(body string) bool {
+	lines := strings.Split(body, "\n")
 	for _, l := range lines[:len(lines)-1] {
-		if !strings.HasSuffix(l, "\\") {
-			return "", false
+		if !strings.HasSuffix(strings.TrimRight(l, " \t"), "\\") {
+			return true
 		}
 	}
-	return out, true
+	return false
+}
+
+// blockOpeners returns the offsets in out just after each token that a
+// statement can follow without a separator: "then", "do", "else", "{", "(",
+// "$(", "in", a case pattern's ")" and ";;".
+func blockOpeners(f *syntax.File, out string) map[int]bool {
+	ends := make(map[int]bool)
+	at := func(p syntax.Pos, n int) {
+		if p.IsValid() {
+			ends[int(p.Offset())+n] = true
+		}
+	}
+	syntax.Walk(f, func(node syntax.Node) bool {
+		switch n := node.(type) {
+		case *syntax.IfClause:
+			if n.ThenPos.IsValid() {
+				at(n.ThenPos, len("then"))
+			} else {
+				at(n.Position, len("else"))
+			}
+		case *syntax.WhileClause:
+			at(n.DoPos, len("do"))
+		case *syntax.ForClause:
+			at(n.DoPos, len("do"))
+		case *syntax.Block:
+			at(n.Lbrace, len("{"))
+		case *syntax.Subshell:
+			at(n.Lparen, len("("))
+		case *syntax.CmdSubst:
+			if n.Backquotes {
+				at(n.Left, len("`"))
+			} else {
+				at(n.Left, len("$("))
+			}
+		case *syntax.CaseClause:
+			at(n.In, len("in"))
+		case *syntax.CaseItem:
+			at(n.OpPos, len(n.Op.String()))
+			if len(n.Patterns) > 0 {
+				end := int(n.Patterns[len(n.Patterns)-1].End().Offset())
+				if i := strings.IndexByte(out[end:], ')'); i >= 0 {
+					ends[end+i+1] = true
+				}
+			}
+		}
+		return true
+	})
+	return ends
+}
+
+// hasHeredoc reports whether f has a heredoc, whose body needs real line
+// breaks.
+func hasHeredoc(f *syntax.File) bool {
+	found := false
+	syntax.Walk(f, func(n syntax.Node) bool {
+		if r, ok := n.(*syntax.Redirect); ok && r.Hdoc != nil {
+			found = true
+		}
+		return !found
+	})
+	return found
 }
 
 // hasInnerComment reports whether a shell comment in src is followed by more
@@ -256,18 +448,41 @@ func hasInnerComment(f *syntax.File, src string) bool {
 	return found
 }
 
-// syntaxPositions lists the offsets of every node of f (plus the operator of
-// each binary command) in walk order. Two trees with the same structure give
-// lists of the same length whose entries correspond one to one.
+// syntaxPositions lists the offsets of every node of f, and of the operators
+// and reserved words inside them (such as "&&", "then" and "fi"), in walk
+// order. Two trees with the same structure give lists of the same length
+// whose entries correspond one to one.
 func syntaxPositions(f *syntax.File) []int {
 	var ps []int
-	syntax.Walk(f, func(n syntax.Node) bool {
-		if n == nil {
+	add := func(positions ...syntax.Pos) {
+		for _, p := range positions {
+			if p.IsValid() {
+				ps = append(ps, int(p.Offset()))
+			}
+		}
+	}
+	syntax.Walk(f, func(node syntax.Node) bool {
+		if node == nil {
 			return true
 		}
-		ps = append(ps, int(n.Pos().Offset()))
-		if b, ok := n.(*syntax.BinaryCmd); ok {
-			ps = append(ps, int(b.OpPos.Offset()))
+		add(node.Pos())
+		switch n := node.(type) {
+		case *syntax.BinaryCmd:
+			add(n.OpPos)
+		case *syntax.IfClause:
+			add(n.ThenPos, n.FiPos)
+		case *syntax.WhileClause:
+			add(n.DoPos, n.DonePos)
+		case *syntax.ForClause:
+			add(n.DoPos, n.DonePos)
+		case *syntax.Block:
+			add(n.Rbrace)
+		case *syntax.Subshell:
+			add(n.Rparen)
+		case *syntax.CaseClause:
+			add(n.In, n.Esac)
+		case *syntax.CaseItem:
+			add(n.OpPos)
 		}
 		return true
 	})

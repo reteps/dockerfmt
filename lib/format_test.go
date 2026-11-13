@@ -79,11 +79,11 @@ func TestFormatShell(t *testing.T) {
 			"echo hello\n",
 		},
 		{
-			"unescaped semicolons bail out",
-			"echo a; echo b",
+			"statements on one line stay on one line",
+			"echo  a;echo b",
 			false,
 			defaultConfig,
-			"echo a; echo b",
+			"echo a; echo b\n",
 		},
 		{
 			"grouped expressions bail out",
@@ -100,11 +100,11 @@ func TestFormatShell(t *testing.T) {
 			"echo hi\necho bye\n",
 		},
 		{
-			"printer splitting statements bails out",
+			"statements in a block are indented",
 			"if true; then \\\n  echo a; echo b; fi",
 			false,
 			defaultConfig,
-			"if true; then \\\n  echo a; echo b; fi",
+			"if true; then \\\n        echo a; echo b; fi\n",
 		},
 		{
 			"comment before operator keeps argument indentation",

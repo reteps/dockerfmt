@@ -1,0 +1,108 @@
+Shell bodies with several statements and compound commands, kept as one
+continued line: statements on separate lines are joined by "; \".
+-- cases --
+# set -eux style, as in the official images
+FROM a
+RUN set -eux; \
+        apt-get update;   \
+  apt-get install -y    curl; \
+      rm -rf /var/lib/apt/lists/*
+
+# statements on one line stay on one line
+FROM a
+RUN set -e;echo  a ; echo b
+
+# if, else
+FROM a
+RUN if [ -f x ]; then \
+  echo yes; \
+else \
+  echo no; \
+fi
+
+# compound commands on one line
+FROM a
+RUN if [ -f x ]; then echo yes; else echo no; fi
+RUN for i in 1 2; do echo $i; done
+RUN { echo a; echo b; } > /f
+
+# for loop over lines
+FROM a
+RUN for i in 1 2; do \
+  echo $i; \
+ done
+
+# case
+FROM a
+RUN case "$x" in \
+  a) echo a ;; \
+  *) echo other ;; \
+ esac
+
+# background job
+FROM a
+RUN sleep 1 & \
+  wait
+
+# && chains inside statements
+FROM a
+RUN set -eux; \
+    apt-get update && apt-get install -y \
+        curl \
+        git; \
+    echo "a \
+  b"; \
+    true
+-- want --
+# set -eux style, as in the official images
+FROM a
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y curl; \
+    rm -rf /var/lib/apt/lists/*
+
+# statements on one line stay on one line
+FROM a
+RUN set -e; echo a; echo b
+
+# if, else
+FROM a
+RUN if [ -f x ]; then \
+        echo yes; \
+    else \
+        echo no; \
+    fi
+
+# compound commands on one line
+FROM a
+RUN if [ -f x ]; then echo yes; else echo no; fi
+RUN for i in 1 2; do echo $i; done
+RUN { echo a; echo b; } >/f
+
+# for loop over lines
+FROM a
+RUN for i in 1 2; do \
+        echo $i; \
+    done
+
+# case
+FROM a
+RUN case "$x" in \
+    a) echo a ;; \
+    *) echo other ;; \
+    esac
+
+# background job
+FROM a
+RUN sleep 1 & \
+    wait
+
+# && chains inside statements
+FROM a
+RUN set -eux; \
+    apt-get update && apt-get install -y \
+        curl \
+        git; \
+    echo "a \
+  b"; \
+    true
