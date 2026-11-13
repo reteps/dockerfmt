@@ -2,6 +2,8 @@ package lib
 
 import (
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/moby/buildkit/frontend/dockerfile/parser"
 )
@@ -77,14 +79,15 @@ func (n *node) multiline() bool {
 // character following it, if any. ok is false if there is nothing after the
 // keyword.
 func (n *node) content() (string, bool) {
-	src := strings.TrimLeft(n.text(), " \t")
-	end := strings.IndexFunc(src, func(r rune) bool { return r == ' ' || r == '\t' || r == n.context().escape })
+	// BuildKit ends the keyword at any whitespace.
+	src := trimIndent(n.text())
+	end := strings.IndexFunc(src, func(r rune) bool { return unicode.IsSpace(r) || r == n.context().escape })
 	if end < 0 {
 		return "", false
 	}
 	rest := src[end:]
-	if rest[0] == ' ' || rest[0] == '\t' {
-		rest = rest[1:]
+	if r, size := utf8.DecodeRuneInString(rest); unicode.IsSpace(r) && r != '\n' {
+		rest = rest[size:]
 	}
 	return rest, true
 }
