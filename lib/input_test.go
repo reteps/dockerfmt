@@ -12,7 +12,11 @@ import (
 func crlf(s string) string { return strings.ReplaceAll(s, "\n", "\r\n") }
 
 func formatString(s string) string {
-	return FormatFileLines(strings.SplitAfter(s, "\n"), defaultConfig)
+	out, err := Format(s, defaultConfig)
+	if err != nil {
+		panic(err)
+	}
+	return out
 }
 
 func TestFormatPreservesCRLF(t *testing.T) {
@@ -77,7 +81,7 @@ func TestFormatMixedLineEndings(t *testing.T) {
 func TestFormatCRLFTrailingNewline(t *testing.T) {
 	c := *defaultConfig
 	c.TrailingNewline = false
-	assert.Equal(t, "FROM a\r\nRUN x", FormatFileLines([]string{"FROM a\r\n", "RUN x\r\n"}, &c))
+	assert.Equal(t, "FROM a\r\nRUN x", mustFormat(t, "FROM a\r\nRUN x\r\n", &c))
 }
 
 func TestUsesCRLF(t *testing.T) {
@@ -112,7 +116,10 @@ func TestFormatUTF8BOM(t *testing.T) {
 	}
 }
 
-func utf16(s string, bigEndian, withBOM bool) string {
+const utf16Source = "FROM alpine\nRUN echo hi\n"
+
+// utf16 returns utf16Source encoded as UTF-16.
+func utf16(bigEndian, withBOM bool) string {
 	var b strings.Builder
 	put := func(r rune) {
 		if bigEndian {
@@ -126,20 +133,19 @@ func utf16(s string, bigEndian, withBOM bool) string {
 	if withBOM {
 		put(0xFEFF)
 	}
-	for _, r := range s {
+	for _, r := range utf16Source {
 		put(r)
 	}
 	return b.String()
 }
 
 func TestFormatRejectsNonUTF8(t *testing.T) {
-	const df = "FROM alpine\nRUN echo hi\n"
 	tests := []struct {
 		name, input, wantErr string
 	}{
-		{"UTF-16 LE", utf16(df, false, true), "file is encoded as UTF-16 (little-endian), not UTF-8"},
-		{"UTF-16 BE", utf16(df, true, true), "file is encoded as UTF-16 (big-endian), not UTF-8"},
-		{"UTF-16 LE without BOM", utf16(df, false, false), "line 1: NUL byte found"},
+		{"UTF-16 LE", utf16(false, true), "file is encoded as UTF-16 (little-endian), not UTF-8"},
+		{"UTF-16 BE", utf16(true, true), "file is encoded as UTF-16 (big-endian), not UTF-8"},
+		{"UTF-16 LE without BOM", utf16(false, false), "line 1: NUL byte found"},
 		{"UTF-32 LE", "\xFF\xFE\x00\x00F\x00\x00\x00", "file is encoded as UTF-32 (little-endian), not UTF-8"},
 		{"UTF-32 BE", "\x00\x00\xFE\xFF\x00\x00\x00F", "file is encoded as UTF-32 (big-endian), not UTF-8"},
 		{"NUL byte", "FROM alpine\nRUN echo \x00\n", "line 2: NUL byte found"},
@@ -154,7 +160,7 @@ func TestFormatRejectsNonUTF8(t *testing.T) {
 			assert.Empty(t, out)
 		})
 	}
-	_, err := Format(utf16(df, false, true), defaultConfig)
+	_, err := Format(utf16(false, true), defaultConfig)
 	assert.Contains(t, err.Error(), "PowerShell")
 }
 

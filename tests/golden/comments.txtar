@@ -1,0 +1,134 @@
+Comments, blank lines and # dockerfmt-ignore.
+-- cases --
+# blank lines after a comment
+FROM a
+# section
+
+
+RUN b
+
+# ignore comment must be the last comment
+# dockerfmt-ignore
+# other
+FROM   a
+
+# ignore comment applies to the next instruction
+FROM    scratch
+# dockerfmt-ignore
+RUN   echo   hello
+RUN   echo   world
+-- want --
+# blank lines after a comment
+FROM a
+# section
+
+RUN b
+
+# ignore comment must be the last comment
+# dockerfmt-ignore
+# other
+FROM a
+
+# ignore comment applies to the next instruction
+FROM scratch
+# dockerfmt-ignore
+RUN   echo   hello
+RUN echo world
+-- indented would-be syntax directive --
+ # syntax=docker/dockerfile:1
+FROM a
+-- want --
+ # syntax=docker/dockerfile:1
+FROM a
+-- comment --
+# https://github.com/jessfraz/dockfmt/issues/12
+FROM scratch
+# a comment
+-- want --
+# https://github.com/jessfraz/dockfmt/issues/12
+FROM scratch
+# a comment
+-- ignore --
+FROM    scratch
+# dockerfmt-ignore
+RUN   echo   "do not format this"   &&   echo    "keep as-is"
+RUN   echo   "this should be formatted"   &&   echo    "yes"
+# a normal comment
+# dockerfmt-ignore
+ENV    FOO    bar
+COPY   src    dst
+
+# Grouping expressions aren't formatted well by shfmt
+# dockerfmt-ignore
+RUN { echo hello && echo world; }
+
+# Unescaped semicolons aren't supported
+# dockerfmt-ignore
+RUN echo hello; echo world
+-- want --
+FROM scratch
+# dockerfmt-ignore
+RUN   echo   "do not format this"   &&   echo    "keep as-is"
+RUN echo "this should be formatted" && echo "yes"
+# a normal comment
+# dockerfmt-ignore
+ENV    FOO    bar
+COPY src dst
+
+# Grouping expressions aren't formatted well by shfmt
+# dockerfmt-ignore
+RUN { echo hello && echo world; }
+
+# Unescaped semicolons aren't supported
+# dockerfmt-ignore
+RUN echo hello; echo world
+-- check directive comments --
+FROM alpine
+run   echo   hi
+# check=skip=JSONArgsRecommended
+FROM   alpine AS final
+
+# check=skip=all
+from alpine
+-- want --
+FROM alpine
+RUN echo hi
+# check=skip=JSONArgsRecommended
+FROM alpine AS final
+
+# check=skip=all
+FROM alpine
+-- a space after the "#" --
+#syntax=docker/dockerfile:1
+#comment
+##section
+#######
+#---- banner
+FROM a
+RUN apt-get update \
+  #install curl
+  && apt-get install -y curl
+ENV A=1 \
+  #note
+  B=2
+#check=skip=all
+#!/bin/sh is not a shebang here, but looks like one
+#dockerfmt-ignore
+RUN   echo   kept
+-- want --
+#syntax=docker/dockerfile:1
+# comment
+## section
+#######
+#---- banner
+FROM a
+RUN apt-get update \
+    # install curl
+    && apt-get install -y curl
+ENV A=1 \
+    # note
+    B=2
+#check=skip=all
+#!/bin/sh is not a shebang here, but looks like one
+# dockerfmt-ignore
+RUN   echo   kept

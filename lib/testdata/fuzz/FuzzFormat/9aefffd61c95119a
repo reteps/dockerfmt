@@ -1,0 +1,4 @@
+go test fuzz v1
+string("RUN 00\\\n0>0")
+uint(3)
+bool(false)

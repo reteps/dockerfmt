@@ -1,0 +1,45 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - errorlint
+    - gocritic
+    - misspell
+    - nolintlint
+    - revive
+    - unconvert
+    - unparam
+    - usestdlibvars
+  settings:
+    gocritic:
+      enabled-tags: [diagnostic, style, performance]
+      disabled-checks:
+        - hugeParam # Config and small structs are passed by value on purpose
+        - unnamedResult
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+        - name: var-naming
+        - name: indent-error-flow
+        - name: unused-parameter
+        - name: redefines-builtin-id
+        - name: early-return
+        - name: superfluous-else
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      # cobra callbacks have a fixed signature.
+      - path: cmd/
+        linters: [revive]
+        text: unused-parameter
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

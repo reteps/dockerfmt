@@ -13,11 +13,36 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26.x'
-      - run: go test ./...
+      - run: go test -race ./...
+      - name: Fuzz
+        run: go test ./lib -run '^$' -fuzz FuzzFormat -fuzztime 60s
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.15.0
+      - name: Lint the wasm build
+        uses: golangci/golangci-lint-action@v9
+        env:
+          GOOS: js
+          GOARCH: wasm
+        with:
+          version: v2.15.0
+          args: ./js/
 
   js-test:
-    name: JS Tests
+    name: JS Tests (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ['20.x', '22.x', '24.x']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -25,12 +50,12 @@ jobs:
           go-version: '1.26.x'
       - uses: actions/setup-node@v4
         with:
-          node-version: '20.x'
+          node-version: ${{ matrix.node }}
       - name: Install wasm-opt
         run: sudo apt-get install -y binaryen
       - name: Build and test
         run: |
           cd js
           npm ci
-          npm run build
-          node --test dist/format.test.js
+          npm run build-go
+          npm test

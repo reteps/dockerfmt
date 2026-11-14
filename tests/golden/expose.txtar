@@ -1,0 +1,29 @@
+EXPOSE.
+-- cases --
+# EXPOSE
+FROM alpine
+expose 8080
+
+# EXPOSE protocols are lower case
+FROM a
+EXPOSE 80/TCP 53/Udp ${P}/SCTP 9/${PROTO} 8080
+-- want --
+# EXPOSE
+FROM alpine
+EXPOSE 8080
+
+# EXPOSE protocols are lower case
+FROM a
+EXPOSE 80/tcp 53/udp ${P}/sctp 9/${PROTO} 8080
+-- expose --
+FROM scratch
+EXPOSE 80 \
+  443 \
+  8080
+EXPOSE 9000
+-- want --
+FROM scratch
+EXPOSE 80 \
+    443 \
+    8080
+EXPOSE 9000

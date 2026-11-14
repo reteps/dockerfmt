@@ -17,6 +17,17 @@ func parseOne(t *testing.T, src string) *parser.Node {
 	return res.AST.Children[0]
 }
 
+// equivalentSource is equivalent, with the formatted instruction given as
+// source the way the formatter checks it.
+func equivalentSource(t *testing.T, original, formatted string, ctx instrContext) (bool, string) {
+	t.Helper()
+	n, err := parseFormatted(formatted, ctx)
+	if err != nil {
+		return false, err.Error()
+	}
+	return equivalent(parseOne(t, original), n.Node, ctx)
+}
+
 func TestEquivalent(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -45,7 +56,7 @@ func TestEquivalent(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, reason := equivalent(parseOne(t, tt.original), tt.formatted, defaultContext())
+			got, reason := equivalentSource(t, tt.original, tt.formatted, defaultContext())
 			assert.Equal(t, tt.want, got, reason)
 		})
 	}
@@ -56,7 +67,7 @@ func TestEquivalentNonPOSIXShellIsExact(t *testing.T) {
 	ctx.posixShell = false
 	// A shell parser would read both as the same command, but PowerShell
 	// doesn't treat "\ " as an escaped space.
-	got, _ := equivalent(parseOne(t, "RUN dir C:\\ | x\n"), "RUN dir C:\\  | x\n", ctx)
+	got, _ := equivalentSource(t, "RUN dir C:\\ | x\n", "RUN dir C:\\  | x\n", ctx)
 	assert.False(t, got)
 }
 
@@ -69,7 +80,7 @@ func TestIsPOSIXShell(t *testing.T) {
 	}
 }
 
-func TestShellScriptShebang(t *testing.T) {
+func TestHasShellShebang(t *testing.T) {
 	for body, want := range map[string]bool{
 		"echo hi\n":                         true,
 		"#!/bin/sh\necho hi\n":              true,
@@ -78,7 +89,7 @@ func TestShellScriptShebang(t *testing.T) {
 		"#!/usr/bin/env python3\nprint()\n": false,
 		"#!/usr/bin/perl\nprint;\n":         false,
 	} {
-		assert.Equal(t, want, shellScriptShebang(body), body)
+		assert.Equal(t, want, hasShellShebang(body), body)
 	}
 }
 
@@ -104,42 +115,45 @@ func TestFallbackLeavesInstructionAsWritten(t *testing.T) {
 	// A meaning-changing format must never reach the output. Force one by
 	// formatting an instruction whose formatter misbehaves: here the
 	// fallback is exercised through a formatter panic.
-	orig := nodeFormatters["stopsignal"]
-	t.Cleanup(func() { nodeFormatters["stopsignal"] = orig })
-	nodeFormatters["stopsignal"] = func(*ExtendedNode, *Config) string { panic("boom") }
+	orig := formatters["stopsignal"]
+	t.Cleanup(func() { formatters["stopsignal"] = orig })
+	formatters["stopsignal"] = func(*node, *Config) string { panic("boom") }
 
 	var reasons []string
-	c := &Config{IndentSize: 4, TrailingNewline: true, OnFallback: func(line int, reason string) {
+	c := &Config{IndentSize: 4, TrailingNewline: true, OnFallback: func(_ int, reason string) {
 		reasons = append(reasons, reason)
 	}}
-	out := FormatFileLines(strings.SplitAfter("FROM a\nSTOPSIGNAL   SIGTERM\nrun   echo  hi\n", "\n"), c)
+	out := mustFormat(t, "FROM a\nSTOPSIGNAL   SIGTERM\nrun   echo  hi\n", c)
 	assert.Equal(t, "FROM a\nSTOPSIGNAL   SIGTERM\nRUN echo hi\n", out)
 	require.Len(t, reasons, 1)
 	assert.Contains(t, reasons[0], "boom")
 }
 
-func TestUnknownInstructionKeptAsWritten(t *testing.T) {
-	for _, src := range []string{
-		"FROM a\nFORM b\nRUN echo  hi\n",
-		"FROM a\nRUN echo  hi\nFORM   b \\\n   c\n",
+func mustFormat(t *testing.T, input string, c *Config) string {
+	t.Helper()
+	out, err := Format(input, c)
+	require.NoError(t, err)
+	return out
+}
+
+func TestEquivalentExpansion(t *testing.T) {
+	for _, tt := range []struct {
+		original, formatted string
+		want                bool
+	}{
+		{"ENV B=${A:+x}\n", "ENV B=x\n", false},
+		{"ENV B=${A:-x}\n", "ENV B=$A\n", false},
+		{"ENV B=${A:?required}\n", "ENV B=$A\n", false},
+		{"ENV B=${A:?required}\n", "ENV   B=${A:?required}\n", true},
 	} {
-		out := FormatFileLines(strings.SplitAfter(src, "\n"), &Config{IndentSize: 4, TrailingNewline: true})
-		assert.Contains(t, out, "FORM", src)
-		assert.Contains(t, out, "RUN echo hi", src)
+		got, reason := equivalentSource(t, tt.original, tt.formatted, defaultContext())
+		assert.Equal(t, tt.want, got, "%q vs %q: %s", tt.original, tt.formatted, reason)
 	}
-	out := FormatFileLines(strings.SplitAfter("FROM a\nFORM   b \\\n   c\n", "\n"), &Config{IndentSize: 4, TrailingNewline: true})
-	assert.Equal(t, "FROM a\nFORM   b \\\n   c\n", out)
 }
 
-func TestCmdJSONKeepsFlags(t *testing.T) {
-	out := FormatFileLines(strings.SplitAfter("FROM a\nCMD --doit [ \"a\", \"b\" ]\n", "\n"), &Config{IndentSize: 4, TrailingNewline: true})
-	assert.Equal(t, "FROM a\nCMD --doit [\"a\", \"b\"]\n", out)
-}
-
-func TestCopyKeepsEndOfFlags(t *testing.T) {
-	c := &Config{IndentSize: 4, TrailingNewline: true, OnFallback: func(line int, reason string) {
-		t.Errorf("line %d: unexpected fallback: %s", line, reason)
-	}}
-	out := FormatFileLines(strings.SplitAfter("FROM a\nCOPY --chown=1  --  --weird /tmp/\nCOPY [\"a\\\"b\", \"c\"]\n", "\n"), c)
-	assert.Equal(t, "FROM a\nCOPY --chown=1 -- --weird /tmp/\nCOPY a\"b c\n", out)
+func TestEquivalentBackquotes(t *testing.T) {
+	// Inside double-quoted backquotes, \" is unescaped before the command
+	// runs; inside $(...) it isn't.
+	got, _ := equivalentSource(t, "RUN echo \"`echo \\\"hi\\\"`\"\n", "RUN echo \"$(echo \\\"hi\\\")\"\n", defaultContext())
+	assert.False(t, got)
 }

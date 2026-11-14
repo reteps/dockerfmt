@@ -1,0 +1,50 @@
+The backtick escape character (# escape=`).
+-- words --
+# escape=`
+FROM scratch
+# With a backtick escape, a backslash is an ordinary character.
+ENV MSG="line one `
+line two" `
+      DIR="C:\dir\" `
+   OTHER=`"x `
+  Y=`"
+ENV QUOTE="say `"hi `
+   there`"" `
+        NEXT=1
+LABEL path="C:\x\ `
+ two" `
+         b=c
+ARG X="a\" `
+      Y=1
+-- want --
+# escape=`
+FROM scratch
+# With a backtick escape, a backslash is an ordinary character.
+ENV MSG="line one `
+line two" `
+    DIR="C:\dir\" `
+    OTHER=`"x `
+    Y=`"
+ENV QUOTE="say `"hi `
+   there`"" `
+    NEXT=1
+LABEL path="C:\x\ `
+ two" `
+    b=c
+ARG X="a\" `
+    Y=1
+-- flags --
+# escape=`
+FROM a
+RUN --mount=type=cache,target=/x echo hi
+COPY --chown=a:b C:\src\ C:\dst\
+COPY --chown=a:b `
+  a b
+-- want --
+# escape=`
+FROM a
+RUN --mount=type=cache,target=/x `
+    echo hi
+COPY --chown=a:b C:\src\ C:\dst\
+COPY --chown=a:b `
+    a b

@@ -1,0 +1,721 @@
+Shell-form RUN, CMD and ENTRYPOINT.
+-- cases --
+# CMD shell form
+FROM alpine
+CMD echo hello
+
+# RUN with flags
+FROM alpine
+RUN --network=host echo hello
+
+# quoted mount target
+FROM a
+RUN --mount=type=cache,target="/x y"   echo hi
+
+# empty body
+FROM a
+RUN
+0
+
+# separator after the directive line
+FROM a
+RUN \
+\
+ echo hi
+
+# shell comment running into the next line
+FROM a
+RUN echo a&#\
+echo b\
+#
+ echo c
+
+# dangling escape
+FROM a
+RUN  echo a\\\
+echo b
+
+# comment on the directive line is shell code
+FROM a
+RUN # c \
+  echo hi
+
+# backquotes are left alone
+FROM a
+RUN  echo "`echo \"hi\"`"
+
+# unknown instruction is kept
+FROM a
+FORM   b \
+   c
+RUN echo  hi
+-- want --
+# CMD shell form
+FROM alpine
+CMD echo hello
+
+# RUN with flags
+FROM alpine
+RUN --network=host echo hello
+
+# quoted mount target
+FROM a
+RUN --mount=type=cache,target="/x y" \
+    echo hi
+
+# empty body
+FROM a
+RUN
+0
+
+# separator after the directive line
+FROM a
+RUN \
+    \
+    echo hi
+
+# shell comment running into the next line
+FROM a
+RUN echo a&#\
+echo b\
+#
+ echo c
+
+# dangling escape
+FROM a
+RUN  echo a\\\
+echo b
+
+# comment on the directive line is shell code
+FROM a
+RUN # c \
+  echo hi
+
+# backquotes are left alone
+FROM a
+RUN  echo "`echo \"hi\"`"
+
+# unknown instruction is kept
+FROM a
+FORM   b \
+   c
+RUN echo hi
+-- trailing comment leaves the continuation --
+FROM a
+RUN echo a \
+#
+-- want --
+FROM a
+RUN echo a
+#
+-- run --
+RUN ["ls"   , "-la"]
+
+RUN echo foo >> bar
+-- want --
+RUN ["ls", "-la"]
+
+RUN echo foo >> bar
+-- run2 --
+RUN apt-get update \
+    # Comment here
+    && apt-get install -y --no-install-recommends \
+        # Another comment here
+        man-db unminimize \
+                    # Multiline comment here
+        # Here
+        gosu curl git htop less nano unzip vim wget zip && \
+    yes | unminimize && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* \
+    && find /tmp -not -path /tmp -delete
+
+RUN apt-get update && \
+    # Run 'unminimize' to add docs
+    apt-get install -y --no-install-recommends man-db unminimize \
+    && yes | unminimize \
+    && apt-get install -y --no-install-recommends \
+    # Reverse proxy workaround for PrairieLearn:
+    nginx \
+    gettext \
+    gosu \
+    fonts-dejavu \
+    # Utilities for convenience debugging this container:
+    less htop vim nano silversearcher-ag zip unzip git cmake curl wget sqlite3 && \
+    # Test:
+    gosu nobody true && \
+    # Cleanup:
+    apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && find /tmp -not -path /tmp -delete
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends man-db unminimize \
+    && yes | unminimize \
+    && apt-get install -y --no-install-recommends \
+    nginx \
+    gettext \
+    gosu \
+    fonts-dejavu \
+    less htop vim nano silversearcher-ag zip unzip git cmake curl wget sqlite3 && \
+    gosu nobody true && \
+    apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && find /tmp -not -path /tmp -delete
+
+CMD apt-get update && \
+apt-get install -y --no-install-recommends man-db unminimize \
+&& yes | unminimize \
+&& apt-get install -y --no-install-recommends \
+nginx \
+gettext \
+gosu \
+fonts-dejavu \
+less htop vim nano silversearcher-ag zip unzip git cmake curl wget sqlite3 && \
+gosu nobody true && \
+apt-get clean \
+&& rm -rf /var/lib/apt/lists/* \
+&& find /tmp -not -path /tmp -delete
+-- want --
+RUN apt-get update \
+    # Comment here
+    && apt-get install -y --no-install-recommends \
+        # Another comment here
+        man-db unminimize \
+        # Multiline comment here
+        # Here
+        gosu curl git htop less nano unzip vim wget zip \
+    && yes | unminimize \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && find /tmp -not -path /tmp -delete
+
+RUN apt-get update \
+    # Run 'unminimize' to add docs
+    && apt-get install -y --no-install-recommends man-db unminimize \
+    && yes | unminimize \
+    && apt-get install -y --no-install-recommends \
+        # Reverse proxy workaround for PrairieLearn:
+        nginx \
+        gettext \
+        gosu \
+        fonts-dejavu \
+        # Utilities for convenience debugging this container:
+        less htop vim nano silversearcher-ag zip unzip git cmake curl wget sqlite3 \
+    # Test:
+    && gosu nobody true \
+    # Cleanup:
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && find /tmp -not -path /tmp -delete
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends man-db unminimize \
+    && yes | unminimize \
+    && apt-get install -y --no-install-recommends \
+        nginx \
+        gettext \
+        gosu \
+        fonts-dejavu \
+        less htop vim nano silversearcher-ag zip unzip git cmake curl wget sqlite3 \
+    && gosu nobody true \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && find /tmp -not -path /tmp -delete
+
+CMD apt-get update \
+    && apt-get install -y --no-install-recommends man-db unminimize \
+    && yes | unminimize \
+    && apt-get install -y --no-install-recommends \
+        nginx \
+        gettext \
+        gosu \
+        fonts-dejavu \
+        less htop vim nano silversearcher-ag zip unzip git cmake curl wget sqlite3 \
+    && gosu nobody true \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && find /tmp -not -path /tmp -delete
+-- run3 --
+RUN apt-get update \
+    # Comment here
+    && apt-get install -y --no-install-recommends \
+        # Another comment here
+        man-db unminimize \
+                    # Multiline comment here
+        # Here
+        # And here
+        gosu curl git htop less nano unzip vim wget zip && \
+    yes | unminimize && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* \
+    && find /tmp -not -path /tmp -delete
+-- want --
+RUN apt-get update \
+    # Comment here
+    && apt-get install -y --no-install-recommends \
+        # Another comment here
+        man-db unminimize \
+        # Multiline comment here
+        # Here
+        # And here
+        gosu curl git htop less nano unzip vim wget zip \
+    && yes | unminimize \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && find /tmp -not -path /tmp -delete
+-- run4 --
+RUN arch="$(uname -m)" \
+    && curl -sfLO "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-${arch}.sh" \
+    && chmod +x "Miniforge3-Linux-${arch}.sh" \
+    && ./"Miniforge3-Linux-${arch}.sh" -b -p /home/coder/conda \
+    # Install conda and mamba hooks for future interactive bash sessions:
+    && /home/coder/conda/bin/mamba init bash \
+    # Activate hooks in the current noninteractive session:
+    && . "/home/coder/conda/etc/profile.d/conda.sh" \
+    && . "/home/coder/conda/etc/profile.d/mamba.sh" \
+    && mamba activate \
+    # Installing `pygraphviz` with pip would require `build-essentials`, `graphviz`,
+    # and `graphviz-dev` to be installed at the OS level, which would increase the
+    # image size. Instead, we install it from Conda, which prebuilds it and also
+    # automatically installs a Conda-specific `graphviz` dependency.
+    && mamba install --yes "$(grep pygraphviz /requirements.txt | head -n 1)" \
+    && pip install --no-cache-dir -r /requirements.txt \
+    && rm "Miniforge3-Linux-${arch}.sh" \
+    && mamba clean --all --yes --quiet \
+    && pip cache purge
+-- want --
+RUN arch="$(uname -m)" \
+    && curl -sfLO "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-${arch}.sh" \
+    && chmod +x "Miniforge3-Linux-${arch}.sh" \
+    && ./"Miniforge3-Linux-${arch}.sh" -b -p /home/coder/conda \
+    # Install conda and mamba hooks for future interactive bash sessions:
+    && /home/coder/conda/bin/mamba init bash \
+    # Activate hooks in the current noninteractive session:
+    && . "/home/coder/conda/etc/profile.d/conda.sh" \
+    && . "/home/coder/conda/etc/profile.d/mamba.sh" \
+    && mamba activate \
+    # Installing `pygraphviz` with pip would require `build-essentials`, `graphviz`,
+    # and `graphviz-dev` to be installed at the OS level, which would increase the
+    # image size. Instead, we install it from Conda, which prebuilds it and also
+    # automatically installs a Conda-specific `graphviz` dependency.
+    && mamba install --yes "$(grep pygraphviz /requirements.txt | head -n 1)" \
+    && pip install --no-cache-dir -r /requirements.txt \
+    && rm "Miniforge3-Linux-${arch}.sh" \
+    && mamba clean --all --yes --quiet \
+    && pip cache purge
+-- run5 --
+# https://github.com/un-ts/prettier/issues/441#issuecomment-2793674631
+FROM ghcr.io/zerocluster/node/app
+
+RUN \
+    # install dependencies
+    NODE_ENV=production npm install-clean \
+    \
+    # cleanup
+    && /usr/bin/env bash <(curl -fsSL https://raw.githubusercontent.com/softvisio/scripts/main/env-build-node.sh) cleanup
+
+RUN \
+    # install dependencies
+    # multiline comment
+    NODE_ENV=production npm install-clean \
+    \
+    # cleanup
+    && /usr/bin/env bash <(curl -fsSL https://raw.githubusercontent.com/softvisio/scripts/main/env-build-node.sh) cleanup
+-- want --
+# https://github.com/un-ts/prettier/issues/441#issuecomment-2793674631
+FROM ghcr.io/zerocluster/node/app
+
+RUN \
+    # install dependencies
+    NODE_ENV=production npm install-clean \
+    \
+    # cleanup
+    && /usr/bin/env bash <(curl -fsSL https://raw.githubusercontent.com/softvisio/scripts/main/env-build-node.sh) cleanup
+
+RUN \
+    # install dependencies
+    # multiline comment
+    NODE_ENV=production npm install-clean \
+    \
+    # cleanup
+    && /usr/bin/env bash <(curl -fsSL https://raw.githubusercontent.com/softvisio/scripts/main/env-build-node.sh) cleanup
+-- comments-in-chains --
+RUN	foo \
+    # comment
+&& \
+# comment 2
+bar && \
+# comment 3
+baz
+-- want --
+RUN foo \
+    # comment
+    # comment 2
+    && bar \
+    # comment 3
+    && baz
+-- separators --
+# https://github.com/reteps/dockerfmt/issues/59
+FROM alpine
+
+# Separators after flags and before && lines
+RUN \
+  --mount=type=bind,source=./a,target=/b \
+  \
+  echo one \
+  \
+  && echo two \
+  \
+  && echo three
+
+# Comment before the first flag
+RUN \
+  # \
+  --mount=type=bind,source=./a,target=/b \
+  --mount=type=cache,target=/c \
+  echo one
+
+# Comment and separator between flags, comment after flags
+RUN --mount=type=bind,source=./a,target=/b \
+  # between flags
+  --mount=type=cache,target=/c \
+  \
+  --mount=type=cache,target=/d \
+  # after flags
+  echo one \
+  \
+  echo two
+
+# Separators in an argument list, before a comment, and with no flags
+RUN apt-get update \
+    \
+    && apt-get install -y \
+        curl \
+        \
+        git \
+    \
+    # comment
+    && rm -rf /var/lib/apt/lists/*
+RUN \
+  \
+  echo one
+
+# Non-mount flags and pipes
+RUN --network=host \
+  \
+  echo one
+RUN echo a \
+  \
+  | grep a \
+  \
+  || true
+
+# Trailing whitespace after the backslash
+RUN echo a \
+  \   
+  && echo b
+
+# CMD shell form
+CMD echo a \
+  \
+  && echo b
+
+# A "\" line with no surrounding whitespace joins words; not a separator
+RUN echo good\
+\
+night \
+  \
+  && echo x
+-- want --
+# https://github.com/reteps/dockerfmt/issues/59
+FROM alpine
+
+# Separators after flags and before && lines
+RUN --mount=type=bind,source=./a,target=/b \
+    \
+    echo one \
+    \
+    && echo two \
+    \
+    && echo three
+
+# Comment before the first flag
+RUN \
+    # \
+    --mount=type=bind,source=./a,target=/b \
+    --mount=type=cache,target=/c \
+    echo one
+
+# Comment and separator between flags, comment after flags
+RUN --mount=type=bind,source=./a,target=/b \
+    # between flags
+    --mount=type=cache,target=/c \
+    \
+    --mount=type=cache,target=/d \
+    # after flags
+    echo one \
+    \
+    echo two
+
+# Separators in an argument list, before a comment, and with no flags
+RUN apt-get update \
+    \
+    && apt-get install -y \
+        curl \
+        \
+        git \
+    \
+    # comment
+    && rm -rf /var/lib/apt/lists/*
+RUN \
+    \
+    echo one
+
+# Non-mount flags and pipes
+RUN --network=host \
+    \
+    echo one
+RUN echo a \
+    \
+    | grep a \
+    \
+    || true
+
+# Trailing whitespace after the backslash
+RUN echo a \
+    \
+    && echo b
+
+# CMD shell form
+CMD echo a \
+    \
+    && echo b
+
+# A "\" line with no surrounding whitespace joins words; not a separator
+RUN echo goodnight \
+    \
+    && echo x
+-- argument-lists --
+# https://github.com/reteps/dockerfmt/issues/77
+FROM alpine
+RUN apk add \
+    curl \
+
+    git
+RUN echo a \
+
+
+  && echo b
+RUN apk add \
+
+    # a comment after a blank line
+    curl
+-- want --
+# https://github.com/reteps/dockerfmt/issues/77
+FROM alpine
+RUN apk add \
+    curl \
+    git
+RUN echo a \
+    && echo b
+RUN apk add \
+    # a comment after a blank line
+    curl
+-- formatted --
+# https://github.com/jessfraz/dockfmt/issues/2
+# set up PrairieLearn and run migrations to initialize the DB
+RUN chmod +x /PrairieLearn/scripts/init.sh \
+    && mkdir /course{,{2..9}} \
+    && mkdir -p /workspace_{main,host}_zips \
+    && mkdir -p /jobs \
+    # Here is a comment in the middle of my command -- `docker run -it --rm`
+    && /PrairieLearn/scripts/start_postgres.sh \
+    && cd /PrairieLearn \
+    && make build \
+    # Here is a multiline comment in my command
+    # The parser has to handle this case, and strip out the
+    # $() chars surrounding
+    && node apps/prairielearn/dist/server.js --migrate-and-exit \
+    && su postgres -c "createuser -s root" \
+    && /PrairieLearn/scripts/start_postgres.sh stop \
+    && /PrairieLearn/scripts/gen_ssl.sh \
+    && git config --global user.email "dev@example.com" \
+    && git config --global user.name "Dev User" \
+    && git config --global safe.directory '*'
+
+HEALTHCHECK --interval=5m --timeout=3s \
+    CMD curl -f http://localhost/ || exit 1
+
+CMD ["/PrairieLearn/scripts/init.sh"]
+-- want --
+# https://github.com/jessfraz/dockfmt/issues/2
+# set up PrairieLearn and run migrations to initialize the DB
+RUN chmod +x /PrairieLearn/scripts/init.sh \
+    && mkdir /course{,{2..9}} \
+    && mkdir -p /workspace_{main,host}_zips \
+    && mkdir -p /jobs \
+    # Here is a comment in the middle of my command -- `docker run -it --rm`
+    && /PrairieLearn/scripts/start_postgres.sh \
+    && cd /PrairieLearn \
+    && make build \
+    # Here is a multiline comment in my command
+    # The parser has to handle this case, and strip out the
+    # $() chars surrounding
+    && node apps/prairielearn/dist/server.js --migrate-and-exit \
+    && su postgres -c "createuser -s root" \
+    && /PrairieLearn/scripts/start_postgres.sh stop \
+    && /PrairieLearn/scripts/gen_ssl.sh \
+    && git config --global user.email "dev@example.com" \
+    && git config --global user.name "Dev User" \
+    && git config --global safe.directory '*'
+
+HEALTHCHECK --interval=5m --timeout=3s \
+    CMD curl -f http://localhost/ || exit 1
+
+CMD ["/PrairieLearn/scripts/init.sh"]
+-- shell --
+# https://github.com/jessfraz/dockfmt/issues/2
+# set up PrairieLearn and run migrations to initialize the DB
+RUN chmod +x /PrairieLearn/scripts/init.sh \
+    && mkdir /course{,{2..9}} \
+    && mkdir -p /workspace_{main,host}_zips \
+    && mkdir -p /jobs \
+    # Here is a comment in the middle of my command -- `docker run -it --rm`
+    && /PrairieLearn/scripts/start_postgres.sh \
+                && cd /PrairieLearn \               
+    && make build \
+    # Here is a multiline comment in my command
+    # The parser has to handle this case, and strip out the
+    # $() chars surrounding
+    && node apps/prairielearn/dist/server.js --migrate-and-exit \            
+    && su postgres -c "createuser -s root" \
+    && /PrairieLearn/scripts/start_postgres.sh stop \
+    && /PrairieLearn/scripts/gen_ssl.sh \
+    && git config --global user.email "dev@example.com" \
+    && git config --global user.name "Dev User" \
+    && git config --global safe.directory '*'
+
+RUN chmod +x /PrairieLearn/scripts/init.sh \
+    && mkdir /course{,{2..9}} \
+    && mkdir -p /workspace_{main,host}_zips \
+    && mkdir -p /jobs && \
+        # Here is a comment in the middle of my command -- `docker run -it --rm`
+    /PrairieLearn/scripts/start_postgres.sh \
+    && cd /PrairieLearn && \
+    make build && \
+        # Here is a multiline comment in my command
+        # The parser has to handle this case, and strip out the
+        # $() chars surrounding
+    node apps/prairielearn/dist/server.js --migrate-and-exit \
+    && su postgres -c "createuser -s root" \
+    && /PrairieLearn/scripts/start_postgres.sh stop \
+    && /PrairieLearn/scripts/gen_ssl.sh \
+    && git config --global user.email "dev@example.com" \
+    && git config --global user.name "Dev User" \
+    && git config --global safe.directory '*'
+
+healthcheck --interval=5m --timeout=3s \
+  CMD curl -f http://localhost/ || exit 1
+CMD /PrairieLearn/scripts/init.sh
+-- want --
+# https://github.com/jessfraz/dockfmt/issues/2
+# set up PrairieLearn and run migrations to initialize the DB
+RUN chmod +x /PrairieLearn/scripts/init.sh \
+    && mkdir /course{,{2..9}} \
+    && mkdir -p /workspace_{main,host}_zips \
+    && mkdir -p /jobs \
+    # Here is a comment in the middle of my command -- `docker run -it --rm`
+    && /PrairieLearn/scripts/start_postgres.sh \
+    && cd /PrairieLearn \
+    && make build \
+    # Here is a multiline comment in my command
+    # The parser has to handle this case, and strip out the
+    # $() chars surrounding
+    && node apps/prairielearn/dist/server.js --migrate-and-exit \
+    && su postgres -c "createuser -s root" \
+    && /PrairieLearn/scripts/start_postgres.sh stop \
+    && /PrairieLearn/scripts/gen_ssl.sh \
+    && git config --global user.email "dev@example.com" \
+    && git config --global user.name "Dev User" \
+    && git config --global safe.directory '*'
+
+RUN chmod +x /PrairieLearn/scripts/init.sh \
+    && mkdir /course{,{2..9}} \
+    && mkdir -p /workspace_{main,host}_zips \
+    && mkdir -p /jobs \
+    # Here is a comment in the middle of my command -- `docker run -it --rm`
+    && /PrairieLearn/scripts/start_postgres.sh \
+    && cd /PrairieLearn \
+    && make build \
+    # Here is a multiline comment in my command
+    # The parser has to handle this case, and strip out the
+    # $() chars surrounding
+    && node apps/prairielearn/dist/server.js --migrate-and-exit \
+    && su postgres -c "createuser -s root" \
+    && /PrairieLearn/scripts/start_postgres.sh stop \
+    && /PrairieLearn/scripts/gen_ssl.sh \
+    && git config --global user.email "dev@example.com" \
+    && git config --global user.name "Dev User" \
+    && git config --global safe.directory '*'
+
+HEALTHCHECK --interval=5m --timeout=3s \
+    CMD curl -f http://localhost/ || exit 1
+CMD /PrairieLearn/scripts/init.sh
+-- quoting --
+FROM hackernews
+# https://news.ycombinator.com/item?id=43630653
+ENTRYPOINT service ssh restart && bash
+
+ENTRYPOINT sh -c 'service ssh restart && bash'
+
+# https://github.com/reteps/dockerfmt/issues/20
+FROM nginx
+ENTRYPOINT ["nginx", "-g", "daemon off;"]
+
+# https://github.com/reteps/dockerfmt/issues/20
+FROM nginx
+ENTRYPOINT nginx -g 'daemon off;'
+-- want --
+FROM hackernews
+# https://news.ycombinator.com/item?id=43630653
+ENTRYPOINT service ssh restart && bash
+
+ENTRYPOINT sh -c 'service ssh restart && bash'
+
+# https://github.com/reteps/dockerfmt/issues/20
+FROM nginx
+ENTRYPOINT ["nginx", "-g", "daemon off;"]
+
+# https://github.com/reteps/dockerfmt/issues/20
+FROM nginx
+ENTRYPOINT nginx -g 'daemon off;'
+-- body left as written after flag lines --
+FROM a
+RUN --mount=type=cache,target=/a \
+        x=`date`; \
+        echo $x
+-- want --
+FROM a
+RUN --mount=type=cache,target=/a \
+        x=`date`; \
+        echo $x
+-- arguments of the first command in a chain --
+FROM a
+RUN apt-get update && apt-get install -y \
+    python-numpy \
+    && apt-get clean
+RUN \
+  uv pip install \
+  -e ./homeassistant \
+  && python3 -m compileall \
+  homeassistant/
+-- want --
+FROM a
+RUN apt-get update && apt-get install -y \
+        python-numpy \
+    && apt-get clean
+RUN uv pip install \
+        -e ./homeassistant \
+    && python3 -m compileall \
+        homeassistant/

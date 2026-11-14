@@ -1,0 +1,492 @@
+Instructions whose arguments are words: ENV, ARG, LABEL, MAINTAINER, USER and the like.
+-- cases --
+# ENV legacy format
+FROM alpine
+ENV MY_VAR my-value
+
+# ENV legacy value with spaces is quoted
+FROM alpine
+ENV JAVA_OPTS -Xms256m -Xmx512m
+
+# ENV legacy value with tabs and repeated spaces
+FROM alpine
+ENV A one	 two   three
+
+# ENV legacy value with variable
+FROM alpine
+ENV PATH $PATH:/opt/bin /usr/x
+
+# ENV legacy already quoted value
+FROM alpine
+ENV A "one two"
+
+# ENV legacy value with embedded quotes has its spaces escaped
+FROM alpine
+ENV A say "hi" there
+
+# ENV modern format
+FROM alpine
+ENV MY_VAR=my-value
+
+# blank lines inside a continuation are removed
+FROM a
+ENV A=1 \
+
+  B=2
+LABEL a=1 \
+  
+  # c
+  b=2
+
+# ARG basic
+FROM alpine
+ARG FOO=bar
+
+# LABEL basic
+FROM alpine
+LABEL version="1.0"
+
+# MAINTAINER converted to LABEL
+FROM alpine
+MAINTAINER me
+
+# MAINTAINER with embedded quotes
+FROM alpine
+MAINTAINER Jane Doe "jane@example.com"
+
+# MAINTAINER wrapped in one pair of quotes
+FROM alpine
+MAINTAINER "Jane Doe"
+
+# MAINTAINER with backslash
+FROM alpine
+MAINTAINER a\\b
+
+# MAINTAINER with variable is not expanded by LABEL
+FROM alpine
+MAINTAINER $USER
+
+# MAINTAINER with email in angle brackets
+FROM alpine
+MAINTAINER Jane Doe <jane@example.com>
+
+# MAINTAINER trailing spaces
+FROM alpine
+MAINTAINER me   
+
+# MAINTAINER without a value
+FROM a
+MAINTAINER
+
+# USER
+FROM alpine
+user nobody
+
+# STOPSIGNAL
+FROM alpine
+stopsignal SIGTERM
+
+# VOLUME
+FROM alpine
+volume /data
+
+# WORKDIR
+FROM alpine
+workdir /app
+
+# HEALTHCHECK NONE uppercased
+FROM alpine
+healthcheck NONE
+-- want --
+# ENV legacy format
+FROM alpine
+ENV MY_VAR=my-value
+
+# ENV legacy value with spaces is quoted
+FROM alpine
+ENV JAVA_OPTS="-Xms256m -Xmx512m"
+
+# ENV legacy value with tabs and repeated spaces
+FROM alpine
+ENV A="one	 two   three"
+
+# ENV legacy value with variable
+FROM alpine
+ENV PATH="$PATH:/opt/bin /usr/x"
+
+# ENV legacy already quoted value
+FROM alpine
+ENV A="one two"
+
+# ENV legacy value with embedded quotes has its spaces escaped
+FROM alpine
+ENV A=say\ "hi"\ there
+
+# ENV modern format
+FROM alpine
+ENV MY_VAR=my-value
+
+# blank lines inside a continuation are removed
+FROM a
+ENV A=1 \
+    B=2
+LABEL a=1 \
+    # c
+    b=2
+
+# ARG basic
+FROM alpine
+ARG FOO=bar
+
+# LABEL basic
+FROM alpine
+LABEL version="1.0"
+
+# MAINTAINER converted to LABEL
+FROM alpine
+LABEL org.opencontainers.image.authors="me"
+
+# MAINTAINER with embedded quotes
+FROM alpine
+LABEL org.opencontainers.image.authors="Jane Doe \"jane@example.com\""
+
+# MAINTAINER wrapped in one pair of quotes
+FROM alpine
+LABEL org.opencontainers.image.authors="Jane Doe"
+
+# MAINTAINER with backslash
+FROM alpine
+LABEL org.opencontainers.image.authors="a\\\\b"
+
+# MAINTAINER with variable is not expanded by LABEL
+FROM alpine
+LABEL org.opencontainers.image.authors="\$USER"
+
+# MAINTAINER with email in angle brackets
+FROM alpine
+LABEL org.opencontainers.image.authors="Jane Doe <jane@example.com>"
+
+# MAINTAINER trailing spaces
+FROM alpine
+LABEL org.opencontainers.image.authors="me"
+
+# MAINTAINER without a value
+FROM a
+MAINTAINER
+
+# USER
+FROM alpine
+USER nobody
+
+# STOPSIGNAL
+FROM alpine
+STOPSIGNAL SIGTERM
+
+# VOLUME
+FROM alpine
+VOLUME /data
+
+# WORKDIR
+FROM alpine
+WORKDIR /app
+
+# HEALTHCHECK NONE uppercased
+FROM alpine
+HEALTHCHECK NONE
+-- env --
+# https://github.com/un-ts/prettier/issues/398
+ENV a=1 \
+  b=2 \
+  # comment
+            c=3 \
+  d=4 \
+  # comment
+  e=5
+
+ENV MY_VAR my-value
+ENV MY_VAR=my-value2 \
+c=4
+ENV MY_VAR=my-value3
+-- want --
+# https://github.com/un-ts/prettier/issues/398
+ENV a=1 \
+    b=2 \
+    # comment
+    c=3 \
+    d=4 \
+    # comment
+    e=5
+
+ENV MY_VAR=my-value
+ENV MY_VAR=my-value2 \
+    c=4
+ENV MY_VAR=my-value3
+-- label --
+# QLC Docker Container
+# https://www.qlcplus.org
+
+# https://github.com/phusion/baseimage-docker/blob/master/Changelog.md
+FROM phusion/baseimage:0.11
+
+LABEL maintainer="REDACTED"
+
+ARG BUILD_DATE
+ARG VCS_REF
+ARG BUILD_VERSION
+
+# Labels.
+LABEL org.label-schema.schema-version="1.0"
+LABEL org.label-schema.build-date=$BUILD_DATE
+LABEL org.label-schema.name="djarbz/qlcplus"
+LABEL org.label-schema.description="QLC+ Docker Image with GUI"
+LABEL org.label-schema.url="https://www.qlcplus.org"
+LABEL org.label-schema.vcs-url="https://github.com/djarbz/qlcplus"
+LABEL org.label-schema.vcs-ref=$VCS_REF
+LABEL org.label-schema.vendor="DJArbz"
+LABEL org.label-schema.version=$BUILD_VERSION
+LABEL org.label-schema.docker.cmd="docker run -it --rm --name QLCplus --device /dev/snd -p 9999:80 --volume='/tmp/.X11-unix:/tmp/.X11-unix:rw' --env=DISPLAY=unix${DISPLAY} djarbz/qlcplus"
+LABEL org.label-schema.docker.cmd.devel="docker run -it --rm --name QLCplus djarbz/qlcplus:4.11.2 xvfb-run qlcplus"
+
+VOLUME /QLC
+
+WORKDIR /QLC
+
+ENV QLC_DEPENDS="\
+                libasound2 \
+                libfftw3-double3 \
+                libftdi1 \
+                libqt4-network \
+                libqt4-script \
+                libqtcore4 \
+                libqtgui4 \
+                libusb-0.1-4"
+
+# XVFB is used to fake an X server for testing and headless mode.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+               ${QLC_DEPENDS} \
+               xvfb \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# https://github.com/mcallegari/qlcplus/releases/tag/QLC+_4.11.2
+ARG QLC_VERSION=4.11.2
+
+ADD https://www.qlcplus.org/downloads/${QLC_VERSION}/qlcplus_${QLC_VERSION}_amd64.deb /opt/qlcplus.deb
+
+RUN dpkg -i /opt/qlcplus.deb
+
+# https://www.qlcplus.org/docs/html_en_EN/commandlineparameters.html
+CMD ["/usr/bin/qlcplus","--operate","--web","--open /QLC/default_workspace.qxw" ]
+-- want --
+# QLC Docker Container
+# https://www.qlcplus.org
+
+# https://github.com/phusion/baseimage-docker/blob/master/Changelog.md
+FROM phusion/baseimage:0.11
+
+LABEL maintainer="REDACTED"
+
+ARG BUILD_DATE
+ARG VCS_REF
+ARG BUILD_VERSION
+
+# Labels.
+LABEL org.label-schema.schema-version="1.0"
+LABEL org.label-schema.build-date=$BUILD_DATE
+LABEL org.label-schema.name="djarbz/qlcplus"
+LABEL org.label-schema.description="QLC+ Docker Image with GUI"
+LABEL org.label-schema.url="https://www.qlcplus.org"
+LABEL org.label-schema.vcs-url="https://github.com/djarbz/qlcplus"
+LABEL org.label-schema.vcs-ref=$VCS_REF
+LABEL org.label-schema.vendor="DJArbz"
+LABEL org.label-schema.version=$BUILD_VERSION
+LABEL org.label-schema.docker.cmd="docker run -it --rm --name QLCplus --device /dev/snd -p 9999:80 --volume='/tmp/.X11-unix:/tmp/.X11-unix:rw' --env=DISPLAY=unix${DISPLAY} djarbz/qlcplus"
+LABEL org.label-schema.docker.cmd.devel="docker run -it --rm --name QLCplus djarbz/qlcplus:4.11.2 xvfb-run qlcplus"
+
+VOLUME /QLC
+
+WORKDIR /QLC
+
+ENV QLC_DEPENDS="\
+                libasound2 \
+                libfftw3-double3 \
+                libftdi1 \
+                libqt4-network \
+                libqt4-script \
+                libqtcore4 \
+                libqtgui4 \
+                libusb-0.1-4"
+
+# XVFB is used to fake an X server for testing and headless mode.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ${QLC_DEPENDS} \
+        xvfb \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# https://github.com/mcallegari/qlcplus/releases/tag/QLC+_4.11.2
+ARG QLC_VERSION=4.11.2
+
+ADD https://www.qlcplus.org/downloads/${QLC_VERSION}/qlcplus_${QLC_VERSION}_amd64.deb /opt/qlcplus.deb
+
+RUN dpkg -i /opt/qlcplus.deb
+
+# https://www.qlcplus.org/docs/html_en_EN/commandlineparameters.html
+CMD ["/usr/bin/qlcplus", "--operate", "--web", "--open /QLC/default_workspace.qxw"]
+-- quoted-continuations --
+FROM scratch
+# Continuation lines inside quoted values keep their leading whitespace.
+ENV MSG="line one \
+line two"
+ENV SINGLE='single one \
+        single two'
+ENV TRAILING="ends with spaces   \
+  next"
+ENV AFTER_ESCAPE="spaces after the backslash are dropped \
+  next" \
+  	TAB=1
+ENV ESCAPED="say \"hi \
+   there\" \
+   friend" \
+        OTHER=1
+ENV MIXED=plain \
+  QUOTED="a \
+b" \
+      AFTER=c \
+  # a comment line is dropped by BuildKit, even inside quotes
+  LAST='x \
+  # dropped too
+  y'
+ENV JOINED=foo\
+bar \
+      NEXT=1
+ENV NOTQUOTED=it\'s \
+      NEXT="x"
+LABEL description="first line \
+second line" \
+        version="1.0"
+LABEL single='one \
+   two'
+ARG GREETING="hello \
+world"
+ARG OTHER='it\' \
+  ESC="a \"b\" \
+  c"
+-- want --
+FROM scratch
+# Continuation lines inside quoted values keep their leading whitespace.
+ENV MSG="line one \
+line two"
+ENV SINGLE='single one \
+        single two'
+ENV TRAILING="ends with spaces   \
+  next"
+ENV AFTER_ESCAPE="spaces after the backslash are dropped \
+  next" \
+    TAB=1
+ENV ESCAPED="say \"hi \
+   there\" \
+   friend" \
+    OTHER=1
+ENV MIXED=plain \
+    QUOTED="a \
+b" \
+    AFTER=c \
+    # a comment line is dropped by BuildKit, even inside quotes
+    LAST='x \
+    # dropped too
+  y'
+ENV JOINED=foo\
+bar \
+    NEXT=1
+ENV NOTQUOTED=it\'s \
+    NEXT="x"
+LABEL description="first line \
+second line" \
+    version="1.0"
+LABEL single='one \
+   two'
+ARG GREETING="hello \
+world"
+ARG OTHER='it\' \
+    ESC="a \"b\" \
+  c"
+-- crash --
+FROM nginx
+WORKDIR /app
+ARG PROJECT_DIR=/
+ARG NGINX_CONF=nginx.conf
+COPY $NGINX_CONF /etc/nginx/conf.d/nginx.conf
+COPY $PROJECT_DIR /app
+CMD mkdir --parents /var/log/nginx && nginx -g "daemon off;"
+-- want --
+FROM nginx
+WORKDIR /app
+ARG PROJECT_DIR=/
+ARG NGINX_CONF=nginx.conf
+COPY $NGINX_CONF /etc/nginx/conf.d/nginx.conf
+COPY $PROJECT_DIR /app
+CMD mkdir --parents /var/log/nginx && nginx -g "daemon off;"
+-- spacing --
+FROM a
+ENV A=1     B="x   y"   C=a\ \ b
+ENV D=1\
+    E=2
+ENV F=x\
+y
+LABEL a=b    c="d e"
+ARG X=1    Y=2
+VOLUME /data   /logs
+VOLUME [ "/data" ,"/x" ]
+USER  me  
+STOPSIGNAL   SIGTERM  
+-- want --
+FROM a
+ENV A=1 B="x   y" C=a\ \ b
+ENV D=1 \
+    E=2
+ENV F=x\
+y
+LABEL a=b c="d e"
+ARG X=1 Y=2
+VOLUME /data /logs
+VOLUME ["/data", "/x"]
+USER me
+STOPSIGNAL SIGTERM
+-- legacy key value --
+FROM a
+LABEL foo bar baz
+LABEL version 1.0
+ENV C x\ y
+ENV P "a b"/c   d
+ENV Q a  "b  c"  'd'
+ENV M --opt="a b"
+ENV V $HOME/x  y
+ENV DEPS \
+    curl \
+    git
+-- want --
+FROM a
+LABEL foo="bar baz"
+LABEL version=1.0
+ENV C=x\ y
+ENV P="a b"/c\ \ \ d
+ENV Q=a\ \ "b  c"\ \ 'd'
+ENV M=--opt="a b"
+ENV V="$HOME/x  y"
+ENV DEPS="curl \
+    git"
+-- legacy value with comments --
+FROM a
+ENV GPG_KEYS \
+# Eric
+	CEC86BB4A0BA9D0F \
+# Sylvain
+	5AED1BF378E9A19D
+-- want --
+FROM a
+ENV GPG_KEYS \
+# Eric
+	CEC86BB4A0BA9D0F \
+# Sylvain
+	5AED1BF378E9A19D

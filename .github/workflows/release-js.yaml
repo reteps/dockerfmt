@@ -1,7 +1,7 @@
 name: Publish Package to npmjs
 on:
   release:
-    types: [created]
+    types: [published]
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -52,7 +52,11 @@ jobs:
       # failure only publishes what's missing (npm rejects republishing an
       # existing version). Platform packages publish first so the main package's
       # optionalDependencies resolve immediately on install.
+      # Prereleases go to the `next` dist-tag so `npm install` keeps resolving
+      # `latest` to the newest stable release.
       - name: Publish to npm
+        env:
+          DIST_TAG: ${{ github.event.release.prerelease && 'next' || 'latest' }}
         run: |
           publish_if_missing() {
             dir=$1
@@ -61,7 +65,7 @@ jobs:
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "$name@$version already published, skipping"
             else
-              npm publish --provenance --access public "$dir"
+              npm publish --provenance --access public --tag "$DIST_TAG" "$dir"
             fi
           }
           for dir in js/npm/*/; do

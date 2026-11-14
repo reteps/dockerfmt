@@ -6,15 +6,14 @@
   args:
     - --write
     - --newline
-    - --space-redirects
   description: Format Dockerfile files
   entry: dockerfmt
-  files: ^.*(Container|Docker)file.*$
+  files: (?i)(^|/)[^/]*(container|docker)file[^/]*$
   id: dockerfmt
   language: golang
   name: dockerfmt
   pass_filenames: true
   require_serial: false
-  exclude: ".dockerignore$"
-  types_or:
-    - dockerfile
+  # Also matches names like Dockerfile.prod; these extensions are other kinds
+  # of files about Dockerfiles.
+  exclude: (?i)(\.dockerignore|\.(md|txt|go|py|js|ts|sh|json|ya?ml|j2|tmpl|tpl))$

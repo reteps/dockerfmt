@@ -4,6 +4,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { formatDockerfile, formatDockerfileContents } from './node.js'
+import { formatDockerfileContents as browserFormat } from './format.js'
 
 const defaultOptions = {
     indent: 4,
@@ -61,6 +62,11 @@ CMD mkdir --parents /var/log/nginx && nginx -g "daemon off;"
         assert.ok(result.endsWith('\n'))
     })
 
+    it('keeps the trailing newline by default', async () => {
+        assert.equal(await formatDockerfileContents('from a\n', {}), 'FROM a\n')
+        assert.equal(await formatDockerfileContents('from a', {}), 'FROM a')
+    })
+
     it('respects trailingNewline: false', async () => {
         const input = 'FROM alpine'
         const result = await formatDockerfileContents(input, {
@@ -68,6 +74,14 @@ CMD mkdir --parents /var/log/nginx && nginx -g "daemon off;"
             trailingNewline: false,
         })
         assert.ok(!result.endsWith('\n'))
+    })
+
+    it('indents with tabs', async () => {
+        const input = 'FROM a\nRUN a \\\n  && b\n'
+        const want = 'FROM a\nRUN a \\\n\t&& b\n'
+        assert.equal(await formatDockerfileContents(input, { useTabs: true }), want)
+        // prettier-plugin-sh passes indent 0 for tabs, as shfmt takes it.
+        assert.equal(await formatDockerfileContents(input, { indent: 0 }), want)
     })
 
     it('respects indent option', async () => {
@@ -105,6 +119,106 @@ RUN echo a \\
             defaultOptions,
         )
         assert.equal(result, 'FROM alpine\n')
+    })
+
+    it('applies defaults for omitted options', async () => {
+        const input = 'from alpine\nrun echo a \\\n  && echo b'
+        const expected = 'FROM alpine\nRUN echo a \\\n    && echo b'
+        assert.equal(await formatDockerfileContents(input), expected)
+        assert.equal(await formatDockerfileContents(input, {}), expected)
+    })
+
+    it('rejects invalid options', async () => {
+        const cases: [unknown, ErrorConstructor, RegExp][] = [
+            [null, TypeError, /options must be an object/],
+            ['4', TypeError, /options must be an object/],
+            [{ indent: '2' }, TypeError, /indent must be an integer/],
+            [{ indent: 2.5 }, TypeError, /indent must be an integer/],
+            [{ indent: NaN }, TypeError, /indent must be an integer/],
+            [{ indent: -1 }, RangeError, /indent must be from 0 \(tabs\) to 16/],
+            [{ indent: 17 }, RangeError, /indent must be from 0 \(tabs\) to 16/],
+            [{ useTabs: 'yes' }, TypeError, /useTabs must be a boolean/],
+            [{ trailingNewline: 1 }, TypeError, /trailingNewline must be a/],
+            [{ spaceRedirects: 'no' }, TypeError, /spaceRedirects must be a/],
+            [{ onFallback: true }, TypeError, /onFallback must be a function/],
+        ]
+        for (const [options, name, message] of cases) {
+            await assert.rejects(
+                formatDockerfileContents('FROM alpine', options as any),
+                (err: Error) =>
+                    err.constructor === name && message.test(err.message),
+                `options ${JSON.stringify(options)}`,
+            )
+        }
+        await assert.rejects(formatDockerfileContents(42 as any), TypeError)
+        assert.equal(
+            await formatDockerfileContents('from alpine', defaultOptions),
+            'FROM alpine\n',
+        )
+    })
+
+    it('formats concurrent calls', async () => {
+        const inputs = Array.from({ length: 20 }, (_, i) => `from alpine:${i}`)
+        const results = await Promise.all(
+            inputs.map((input, i) =>
+                formatDockerfileContents(input, {
+                    ...defaultOptions,
+                    indent: (i % 16) + 1,
+                }),
+            ),
+        )
+        assert.deepEqual(
+            results,
+            inputs.map((_, i) => `FROM alpine:${i}\n`),
+        )
+    })
+
+    // Mostly "\r\n" line endings, but formatting the file with them would add
+    // a "\r" to each line of the heredoc script, so it is left as written.
+    const fallbackInput =
+        'FROM alpine\r\nRUN  echo a\r\nRUN  echo b\r\nRUN <<EOF\necho x\nEOF\n'
+
+    it('instantiates the WASM module once', async () => {
+        let loads = 0
+        const getWasm = () => {
+            loads++
+            return fs.readFile(new URL('format.wasm', import.meta.url))
+        }
+        await Promise.all([
+            browserFormat('from a', defaultOptions, getWasm),
+            browserFormat('from b', defaultOptions, getWasm),
+            formatDockerfileContents('from c', defaultOptions),
+        ])
+        await browserFormat('from d', defaultOptions, getWasm)
+        assert.ok(loads <= 1, `loaded ${loads} times`)
+    })
+
+    it('reports fallbacks to onFallback', async () => {
+        const fallbacks: [number, string][] = []
+        const result = await formatDockerfileContents(fallbackInput, {
+            ...defaultOptions,
+            onFallback: (line, reason) => fallbacks.push([line, reason]),
+        })
+        assert.equal(result, fallbackInput)
+        assert.equal(fallbacks.length, 1)
+        assert.equal(fallbacks[0][0], 4)
+        assert.match(fallbacks[0][1], /line endings/)
+    })
+
+    it('rejects with the error thrown by onFallback', async () => {
+        const thrown = new Error('stop')
+        await assert.rejects(
+            formatDockerfileContents(fallbackInput, {
+                onFallback: () => {
+                    throw thrown
+                },
+            }),
+            (err) => err === thrown,
+        )
+        assert.equal(
+            await formatDockerfileContents('from alpine', defaultOptions),
+            'FROM alpine\n',
+        )
     })
 
     it('rejects UTF-16 decoded as UTF-8', async () => {

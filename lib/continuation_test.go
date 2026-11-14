@@ -75,31 +75,22 @@ func TestReindentContinuations(t *testing.T) {
 			"A=1 \\\n  # comment  \n        B=2\n", true,
 			"A=1 \\\n    # comment\n    B=2\n",
 		},
-		{"blank line emptied", "A=1 \\\n   \n  B=2\n", true, "A=1 \\\n\n    B=2\n"},
+		{"blank line removed", "A=1 \\\n   \n  B=2\n", true, "A=1 \\\n    B=2\n"},
 		{"word continued on next line kept", "A=foo\\\nbar\n", true, "A=foo\\\nbar\n"},
 		{"word separated by leading whitespace re-indented", "A=x\\ \\\n  B=2\n", true, "A=x\\ \\\n    B=2\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, reindentContinuations(tt.raw, 4, '\\', tt.trimRight))
+			assert.Equal(t, tt.expected, reindentContinuations(tt.raw, "    ", '\\', tt.trimRight))
 		})
 	}
 
 	t.Run("no indentation keeps a separating space", func(t *testing.T) {
-		assert.Equal(t, "A=x\\ \\\n  B=2\n", reindentContinuations("A=x\\ \\\n  B=2\n", 0, '\\', true))
-		assert.Equal(t, "A=1 \\\nB=2\n", reindentContinuations("A=1 \\\n  B=2\n", 0, '\\', true))
+		assert.Equal(t, "A=x\\ \\\n  B=2\n", reindentContinuations("A=x\\ \\\n  B=2\n", "", '\\', true))
+		assert.Equal(t, "A=1 \\\nB=2\n", reindentContinuations("A=1 \\\n  B=2\n", "", '\\', true))
 	})
 	t.Run("backtick escape", func(t *testing.T) {
 		raw := "A=\"C:\\ `\n  x\" `\n      B=`\"\n"
-		assert.Equal(t, "A=\"C:\\ `\n  x\" `\n    B=`\"\n", reindentContinuations(raw, 4, '`', true))
+		assert.Equal(t, "A=\"C:\\ `\n  x\" `\n    B=`\"\n", reindentContinuations(raw, "    ", '`', true))
 	})
-}
-
-func TestContinuationEscape(t *testing.T) {
-	assert.Equal(t, '\\', continuationEscape("ENV A=1\n"))
-	assert.Equal(t, '\\', continuationEscape("ENV A=1 \\\n  B=2\n"))
-	assert.Equal(t, '`', continuationEscape("ENV A=1 `\n  B=2\n"))
-	assert.Equal(t, '`', continuationEscape("ENV A=1 `  \n  B=2\n"))
-	// A single-line instruction ending in a backtick doesn't use it as escape.
-	assert.Equal(t, '\\', continuationEscape("ENV A=`x`\n"))
 }

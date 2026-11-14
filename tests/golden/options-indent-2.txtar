@@ -1,0 +1,14 @@
+Continuation lines indented by 2 spaces.
+indent: 2
+-- cases --
+FROM alpine
+RUN echo a \
+  && echo b
+ENV A=1 \
+    B=2
+-- want --
+FROM alpine
+RUN echo a \
+  && echo b
+ENV A=1 \
+  B=2

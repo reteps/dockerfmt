@@ -1,0 +1,4 @@
+go test fuzz v1
+string("ENV =\\\r \n#")
+uint(4)
+bool(false)

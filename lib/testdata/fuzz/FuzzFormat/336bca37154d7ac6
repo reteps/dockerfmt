@@ -1,0 +1,4 @@
+go test fuzz v1
+string("rUN \"\"\\  \\\n\n")
+uint(365)
+bool(false)

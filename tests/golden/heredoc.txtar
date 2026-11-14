@@ -1,0 +1,172 @@
+Heredocs.
+-- cases --
+# chomped heredoc is indented with tabs
+FROM a
+RUN <<-EOF
+	if true; then
+		echo   x
+	fi
+EOF
+-- want --
+# chomped heredoc is indented with tabs
+FROM a
+RUN <<-EOF
+if true; then
+	echo x
+fi
+EOF
+-- heredoc --
+RUN <<EOF
+echo "Hello" >>             /hello
+echo "World!">>/hello
+EOF
+RUN ls
+
+RUN <<-EOF
+echo "Hello" >>             /hello
+echo "World!">>/hello
+EOF
+
+COPY <<-EOF /x
+x
+EOF
+
+COPY <<-EOT /script.sh
+  echo "hello ${FOO}"
+EOT
+COPY <<-EOF /x
+x
+EOF
+
+-- want --
+RUN <<EOF
+echo "Hello" >> /hello
+echo "World!" >> /hello
+EOF
+RUN ls
+
+RUN <<-EOF
+echo "Hello" >> /hello
+echo "World!" >> /hello
+EOF
+
+COPY <<-EOF /x
+x
+EOF
+
+COPY <<-EOT /script.sh
+  echo "hello ${FOO}"
+EOT
+COPY <<-EOF /x
+x
+EOF
+-- copy-heredocs --
+# https://github.com/reteps/dockerfmt/issues/76
+FROM scratch
+COPY <<a.txt <<b.txt /dst/
+first
+a.txt
+second
+b.txt
+FROM alpine
+RUN <<A <<B cat
+echo  a
+A
+echo  b
+B
+# Flags on a heredoc COPY are kept
+COPY --chmod=755 <<-EOT /build.sh
+#!/bin/sh
+	set -ex
+EOT
+COPY --link --chmod=755 <<"EOF" /entry.sh
+#!/bin/sh
+exec "$@"
+EOF
+-- want --
+# https://github.com/reteps/dockerfmt/issues/76
+FROM scratch
+COPY <<a.txt <<b.txt /dst/
+first
+a.txt
+second
+b.txt
+FROM alpine
+RUN <<A <<B cat
+echo  a
+A
+echo  b
+B
+# Flags on a heredoc COPY are kept
+COPY --chmod=755 <<-EOT /build.sh
+#!/bin/sh
+	set -ex
+EOT
+COPY --link --chmod=755 <<"EOF" /entry.sh
+#!/bin/sh
+exec "$@"
+EOF
+-- data-heredocs --
+# https://github.com/reteps/dockerfmt/issues/80
+FROM python:3.13-alpine
+RUN <<EOF python3
+print("hello")
+EOF
+RUN python3 <<EOF
+print("x")
+EOF
+RUN <<EOF
+#!/usr/bin/env python3
+print("y")
+EOF
+RUN <<EOF
+echo   shell
+EOF
+RUN <<EOF
+#!/bin/bash
+echo   bash   script
+EOF
+RUN cat <<EOF > /etc/app.conf
+key =   value
+EOF
+-- want --
+# https://github.com/reteps/dockerfmt/issues/80
+FROM python:3.13-alpine
+RUN <<EOF python3
+print("hello")
+EOF
+RUN python3 <<EOF
+print("x")
+EOF
+RUN <<EOF
+#!/usr/bin/env python3
+print("y")
+EOF
+RUN <<EOF
+echo shell
+EOF
+RUN <<EOF
+#!/bin/bash
+echo bash script
+EOF
+RUN cat <<EOF > /etc/app.conf
+key =   value
+EOF
+-- after a mount --
+FROM a
+RUN --mount=target=/root/.cache,type=cache <<EOT
+echo hi
+EOT
+RUN --mount=type=cache,target=/a --mount=type=cache,target=/b <<EOT
+echo hi
+EOT
+-- want --
+FROM a
+RUN --mount=target=/root/.cache,type=cache <<EOT
+echo hi
+EOT
+RUN --mount=type=cache,target=/a \
+    --mount=type=cache,target=/b \
+    <<EOT
+echo hi
+EOT

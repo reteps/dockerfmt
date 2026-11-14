@@ -1,0 +1,4 @@
+go test fuzz v1
+string("SHELL\f0\nSHELL A&0")
+uint(79)
+bool(false)

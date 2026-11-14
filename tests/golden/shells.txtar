@@ -1,0 +1,65 @@
+Stages whose shell isn't POSIX sh, which are left as written.
+-- powershell --
+# https://github.com/reteps/dockerfmt/issues/72
+FROM mcr.microsoft.com/powershell
+SHELL ["pwsh", "-Command"]
+RUN if ($true) { Write-Host hi }
+RUN Get-ChildItem -Path C:\ | Select-Object Name
+CMD Write-Host   a
+FROM alpine
+RUN echo   reset
+FROM mcr.microsoft.com/windows/servercore:ltsc2022
+SHELL ["cmd", "/S", "/C"]
+RUN dir   C:\ && echo   done
+SHELL ["powershell.exe", "-Command"]
+ONBUILD RUN Write-Host   onbuild
+SHELL ["/bin/bash", "-c"]
+RUN echo   bash   again
+-- want --
+# https://github.com/reteps/dockerfmt/issues/72
+FROM mcr.microsoft.com/powershell
+SHELL ["pwsh", "-Command"]
+RUN if ($true) { Write-Host hi }
+RUN Get-ChildItem -Path C:\ | Select-Object Name
+CMD Write-Host   a
+FROM alpine
+RUN echo reset
+FROM mcr.microsoft.com/windows/servercore:ltsc2022
+SHELL ["cmd", "/S", "/C"]
+RUN dir   C:\ && echo   done
+SHELL ["powershell.exe", "-Command"]
+ONBUILD RUN Write-Host   onbuild
+SHELL ["/bin/bash", "-c"]
+RUN echo bash again
+-- stage built on a PowerShell stage --
+FROM a AS base
+SHELL ["pwsh", "-Command"]
+FROM base
+RUN  Write-Host   x
+-- want --
+FROM a AS base
+SHELL ["pwsh", "-Command"]
+FROM base
+RUN  Write-Host   x
+-- stage built on a POSIX stage --
+FROM a AS Base
+FROM base
+RUN  echo   x
+-- want --
+FROM a AS base
+FROM base
+RUN echo x
+-- Windows base image --
+FROM mcr.microsoft.com/windows/servercore:ltsc2022
+RUN echo hello   world> C:\out.txt
+-- want --
+FROM mcr.microsoft.com/windows/servercore:ltsc2022
+RUN echo hello   world> C:\out.txt
+-- Windows base image named by a global ARG --
+ARG BASE=mcr.microsoft.com/windows/servercore:ltsc2019
+FROM ${BASE}
+RUN powershell busybox.exe --list ^|%{$nul = cmd /c mklink C:\bin\$_.exe busybox.exe}
+-- want --
+ARG BASE=mcr.microsoft.com/windows/servercore:ltsc2019
+FROM ${BASE}
+RUN powershell busybox.exe --list ^|%{$nul = cmd /c mklink C:\bin\$_.exe busybox.exe}

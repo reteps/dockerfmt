@@ -1,157 +1,158 @@
 package lib
 
-// Semantic equivalence checking. After an instruction is formatted, the output
-// is parsed again with BuildKit and compared with BuildKit's reading of the
-// original. If they differ, the formatter changed what the instruction does,
-// and the caller emits the original text instead. This turns formatter bugs
-// into "left unformatted" rather than "broke the build".
-
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"path"
 	"reflect"
 	"slices"
 	"strings"
 
 	"github.com/moby/buildkit/frontend/dockerfile/instructions"
+	"github.com/moby/buildkit/frontend/dockerfile/linter"
 	"github.com/moby/buildkit/frontend/dockerfile/parser"
 	"github.com/moby/buildkit/frontend/dockerfile/shell"
 	"mvdan.cc/sh/v3/syntax"
 )
 
-// instrContext is the file-level state an instruction is interpreted in.
-type instrContext struct {
-	// escape is the escape character (from a "# escape=" parser directive).
-	escape rune
-	// posixShell is false after a SHELL instruction selects a shell that
-	// isn't POSIX sh (e.g. PowerShell or cmd), until the next FROM.
-	posixShell bool
-}
-
-// formatsShell reports whether shell-form bodies can be formatted as POSIX
-// shell with backslash continuations.
-func (ctx instrContext) formatsShell() bool {
-	return ctx.posixShell && ctx.escape == '\\'
-}
-
-func defaultContext() instrContext {
-	return instrContext{escape: '\\', posixShell: true}
-}
-
-// update advances the context past instruction n.
-func (ctx *instrContext) update(n *parser.Node) {
-	switch strings.ToUpper(n.Value) {
-	case "FROM":
-		ctx.posixShell = true
-	case "SHELL":
-		if n.Next != nil {
-			ctx.posixShell = isPOSIXShell(n.Next.Value)
-		}
+// parseFormatted parses formatted, the formatter's output for one
+// instruction, in context ctx. It fails unless that is exactly one
+// instruction.
+func parseFormatted(formatted string, ctx instrContext) (*node, error) {
+	src := formatted
+	if ctx.escape != '\\' {
+		src = "# escape=" + string(ctx.escape) + "\n" + src
 	}
-}
-
-// isPOSIXShell reports whether the shell executable at path is a POSIX sh
-// compatible shell that mvdan/sh can parse.
-func isPOSIXShell(exe string) bool {
-	exe = strings.ToLower(path.Base(strings.ReplaceAll(exe, `\`, "/")))
-	switch strings.TrimSuffix(exe, ".exe") {
-	case "sh", "bash", "ash", "dash", "ksh", "mksh", "zsh", "busybox":
-		return true
-	}
-	return false
-}
-
-// shellScriptShebang reports whether a heredoc body without a shebang, or with
-// one naming a POSIX shell, is a shell script.
-func shellScriptShebang(body string) bool {
-	first, _, _ := strings.Cut(body, "\n")
-	interp, ok := strings.CutPrefix(strings.TrimSpace(first), "#!")
-	if !ok {
-		return true
-	}
-	fields := strings.Fields(interp)
-	if len(fields) == 0 {
-		return false
-	}
-	exe := fields[0]
-	if path.Base(exe) == "env" {
-		// #!/usr/bin/env [-S] bash
-		for _, f := range fields[1:] {
-			if !strings.HasPrefix(f, "-") {
-				exe = f
-				break
-			}
-		}
-	}
-	return isPOSIXShell(exe)
-}
-
-// isShellScriptHeredoc reports whether n is "RUN <<EOF" with the heredoc as the
-// whole command, so its body is a script run by the default shell. Bodies fed
-// to another program (RUN python3 <<EOF, RUN <<EOF python3) are data.
-func isShellScriptHeredoc(n *parser.Node, ctx instrContext) bool {
-	if !ctx.posixShell || strings.ToUpper(n.Value) != "RUN" || len(n.Heredocs) != 1 || n.Next == nil {
-		return false
-	}
-	cmd := strings.TrimSpace(n.Next.Value)
-	if cmd != "<<"+n.Heredocs[0].Name && cmd != "<<-"+n.Heredocs[0].Name &&
-		!strings.HasPrefix(cmd, "<<\"") && !strings.HasPrefix(cmd, "<<'") &&
-		!strings.HasPrefix(cmd, "<<-\"") && !strings.HasPrefix(cmd, "<<-'") {
-		return false
-	}
-	if len(strings.Fields(cmd)) != 1 {
-		return false
-	}
-	return shellScriptShebang(n.Heredocs[0].Content)
-}
-
-type fakeEnv struct{}
-
-// Get resolves every variable to a placeholder, so expansion is visible in the
-// result (and "$X" never compares equal to a literal "X").
-func (fakeEnv) Get(k string) (string, bool) { return "\x00" + k + "\x00", true }
-func (fakeEnv) Keys() []string              { return nil }
-
-func expander(escape rune) instructions.SingleWordExpander {
-	lex := shell.NewLex(escape)
-	return func(word string) (string, error) {
-		r, _, err := lex.ProcessWord(word, fakeEnv{})
-		return r, err
-	}
-}
-
-// canonicalShell returns s in a whitespace-insensitive canonical form, so two
-// shell commands that differ only in layout compare equal.
-func canonicalShell(s string) string {
-	f, err := syntax.NewParser().Parse(strings.NewReader(s), "")
+	res, err := parser.Parse(strings.NewReader(src))
 	if err != nil {
-		return "unparsed:" + s
+		return nil, fmt.Errorf("output does not parse: %w", err)
 	}
-	var b bytes.Buffer
-	if err := syntax.NewPrinter(syntax.Minify(true)).Print(&b, f); err != nil {
-		return "unparsed:" + s
+	if len(res.AST.Children) != 1 {
+		return nil, fmt.Errorf("output parses as %d instructions", len(res.AST.Children))
 	}
-	return strings.TrimSpace(b.String())
+	n := newNode(res.AST.Children[0], strings.SplitAfter(src, "\n"))
+	n.ctx = &ctx
+	return n, nil
 }
 
-// semanticKey describes what BuildKit does with instruction n, in a form where
-// two instructions compare equal iff they behave the same.
+// equivalent reports whether formatted, the formatter's output for original,
+// means the same to BuildKit as original. reason explains a mismatch.
+func equivalent(original, formatted *parser.Node, ctx instrContext) (ok bool, reason string) {
+	want, wantErr := semanticKey(original, ctx)
+	got, gotErr := semanticKey(formatted, ctx)
+	switch {
+	case wantErr != nil && gotErr != nil:
+		// An already invalid instruction (e.g. "ONBUILD ARG" with no name) can't
+		// break a working build by staying invalid.
+		return true, ""
+	case wantErr != nil:
+		return false, fmt.Sprintf("original is invalid (%v) but output is not", wantErr)
+	case gotErr != nil:
+		return false, fmt.Sprintf("output is invalid: %v", gotErr)
+	case got != want:
+		return false, "output differs in meaning"
+	}
+	return true, ""
+}
+
+// sameFile reports whether BuildKit reads the whole files a and b as the same
+// instructions with the same meaning. If not, it returns why, and the first
+// line in a of an instruction that differs.
+//
+// Format checks each instruction as it formats it, on input with normalized
+// line endings. This checks the files as written, which differ from what was
+// checked when the input mixes line endings: BuildKit keeps the "\r" of a
+// "\r\n" in heredoc bodies and quoted values.
+func sameFile(a, b string) (line int, reason string) {
+	defer func() {
+		if r := recover(); r != nil {
+			line, reason = 1, fmt.Sprintf("checking the formatted file failed: %v", r)
+		}
+	}()
+	ka, la, err := fileKeys(a)
+	if err != nil {
+		return 1, fmt.Sprintf("checking the file failed: %v", err)
+	}
+	kb, _, err := fileKeys(b)
+	if err != nil {
+		return 1, fmt.Sprintf("the formatted file doesn't parse: %v", err)
+	}
+	for i := range ka {
+		if i >= len(kb) || ka[i] != kb[i] {
+			return la[i], "formatting the file would change what this instruction means (are its line endings mixed?)"
+		}
+	}
+	if len(kb) > len(ka) {
+		return 1, "the formatted file has more instructions"
+	}
+	return 0, ""
+}
+
+// fileKeys returns the semantic key of each instruction of the file content,
+// and the line each starts on.
+func fileKeys(content string) (keys []string, lines []int, err error) {
+	res, err := parser.Parse(strings.NewReader(content))
+	if err != nil {
+		return nil, nil, err
+	}
+	ctx := defaultContext()
+	if res.EscapeToken != 0 {
+		ctx.escape = res.EscapeToken
+	}
+	for _, n := range res.AST.Children {
+		key, err := semanticKey(n, ctx)
+		if err != nil {
+			// As in equivalent, an instruction that stays invalid is
+			// unchanged. The error can't be compared: its "did you mean"
+			// suggestion varies between runs.
+			key = "invalid " + strings.ToUpper(n.Value)
+		}
+		keys = append(keys, key)
+		lines = append(lines, n.StartLine)
+		ctx.update(n)
+	}
+	return keys, lines, nil
+}
+
+// semanticKey describes what BuildKit does with instruction n, such that two
+// instructions get the same key iff they behave the same.
+//
+// Words are expanded twice, with every variable set and with every variable
+// unset, so that forms like ${A:-x} and ${A:+x} differ from what they expand
+// to in either case.
 func semanticKey(n *parser.Node, ctx instrContext) (string, error) {
-	v, err := instructions.ParseInstruction(n)
+	set, err := semanticKeyIn(n, ctx, fakeEnv{})
 	if err != nil {
 		return "", err
 	}
-	exp := expander(ctx.escape)
+	unset, err := semanticKeyIn(n, ctx, fakeEnv{unset: true})
+	if err != nil {
+		// ${A:?message} fails when A is unset; that is part of what the
+		// instruction does, not a sign it is invalid.
+		unset = "error: " + err.Error()
+	}
+	return set + "\n" + unset, nil
+}
+
+func semanticKeyIn(n *parser.Node, ctx instrContext, env fakeEnv) (string, error) {
+	// ParseInstruction has no linter, and fails on an instruction with a
+	// "# check=" comment above it, which BuildKit merges into the linter's
+	// configuration. This one reports nothing.
+	v, err := instructions.ParseInstructionWithLinter(n, linter.New(&linter.Config{}))
+	if err != nil {
+		return "", err
+	}
+	exp := expander(ctx.escape, env)
 
 	switch c := v.(type) {
 	case *instructions.Stage:
-		return fmt.Sprintf("FROM %q AS %q PLATFORM %q", c.BaseName, c.Name, c.Platform), nil
+		// The formatter lowers a base that names an earlier stage, which
+		// BuildKit then finds (see stageRef).
+		return fmt.Sprintf("FROM %q AS %q PLATFORM %q", ctx.stageRef(c.BaseName), c.Name, c.Platform), nil
 	case *instructions.MaintainerCommand:
-		// dockerfmt rewrites MAINTAINER as this LABEL; see formatMaintainer.
-		value := unwrapMaintainerQuotes(c.Maintainer)
-		return fmt.Sprintf("LABEL [%q]", "org.opencontainers.image.authors="+value), nil
+		// formatMaintainer rewrites MAINTAINER as this LABEL. It shares unwrapMaintainerQuotes with the
+		// formatter, so it can't catch a bug there; the tests do.
+		return labelKey([]string{maintainerLabel + "=" + unwrapMaintainerQuotes(c.Maintainer)}), nil
 	case *instructions.LabelCommand:
 		if err := c.Expand(exp); err != nil {
 			return "", err
@@ -160,7 +161,7 @@ func semanticKey(n *parser.Node, ctx instrContext) (string, error) {
 		for _, kv := range c.Labels {
 			pairs = append(pairs, kv.Key+"="+kv.Value)
 		}
-		return fmt.Sprintf("LABEL %q", pairs), nil
+		return labelKey(pairs), nil
 	case *instructions.OnbuildCommand:
 		res, err := parser.Parse(strings.NewReader(c.Expression))
 		if err != nil {
@@ -187,18 +188,33 @@ func semanticKey(n *parser.Node, ctx instrContext) (string, error) {
 		}
 	}
 	switch c := v.(type) {
+	case *instructions.CopyCommand:
+		// BuildKit finds the stage ignoring case.
+		c.From = ctx.stageRef(c.From)
+	case *instructions.ExposeCommand:
+		// BuildKit lowers the protocol when it sets the exposed ports.
+		for i, p := range c.Ports {
+			c.Ports[i] = lowerExposeProtocol(p)
+		}
 	case *instructions.EnvCommand:
-		// NoDelim only records the legacy "ENV key value" syntax.
+		// NoDelim only records whether the legacy "ENV key value" form was used.
 		for i := range c.Env {
 			c.Env[i].NoDelim = false
 		}
 	case *instructions.RunCommand:
 		canonCmdLine(&c.ShellDependantCmdLine)
+		// BuildKit collects these from a map, in no fixed order.
+		slices.Sort(c.FlagsUsed)
 		if isShellScriptHeredoc(n, ctx) {
 			c.Files[0].Data = canonicalShell(c.Files[0].Data)
 		}
-		// Flags are compared as written; their order doesn't matter.
-		return fmt.Sprintf("RUN flags=%q %s", sortedCopy(n.Flags), mustJSON(c)), nil
+		// The order of flags can matter (overlapping mounts), so it is kept.
+		// BuildKit finds a mount's stage ignoring case.
+		flags := make([]string, len(n.Flags))
+		for i, f := range n.Flags {
+			flags[i] = ctx.lowerStageRefs(f)
+		}
+		return fmt.Sprintf("RUN flags=%q %s", flags, mustJSON(c)), nil
 	case *instructions.CmdCommand:
 		canonCmdLine(&c.ShellDependantCmdLine)
 	case *instructions.EntrypointCommand:
@@ -211,49 +227,69 @@ func semanticKey(n *parser.Node, ctx instrContext) (string, error) {
 	return reflect.TypeOf(v).String() + " " + mustJSON(v), nil
 }
 
-func sortedCopy(s []string) []string {
-	out := slices.Clone(s)
-	slices.Sort(out)
-	return out
+func labelKey(pairs []string) string {
+	return fmt.Sprintf("LABEL %q", pairs)
 }
 
+// fakeEnv resolves every variable to a placeholder, so that expansion shows
+// in a word's expanded form and "$X" never equals a literal "X". With unset,
+// every variable is unset instead.
+type fakeEnv struct{ unset bool }
+
+func (e fakeEnv) Get(k string) (string, bool) {
+	if e.unset {
+		return "", false
+	}
+	return "\x00" + k + "\x00", true
+}
+func (fakeEnv) Keys() []string { return nil }
+
+func expander(escape rune, env fakeEnv) instructions.SingleWordExpander {
+	lex := shell.NewLex(escape)
+	return func(word string) (string, error) {
+		r, _, err := lex.ProcessWord(word, env)
+		return r, err
+	}
+}
+
+// canonicalShell returns s in a form that ignores layout, so two commands
+// that differ only in whitespace and line breaks compare equal.
+func canonicalShell(s string) string {
+	// mvdan/sh reads "\r", "\v" and "\f" as blanks, while the shell takes them
+	// literally. A script with "\r\n" line endings keeps them when formatted,
+	// so only their presence counts; anywhere else, the layout around these
+	// characters matters.
+	prefix := ""
+	if strings.Contains(s, "\r\n") {
+		prefix = "crlf:"
+		s = strings.ReplaceAll(s, "\r\n", "\n")
+	}
+	if strings.ContainsAny(s, "\v\f\r`") {
+		// mvdan/sh also prints backquotes as $(...) without undoing the
+		// escapes inside them, which changes the command.
+		return "unparsed:" + prefix + s
+	}
+	return prefix + printCanonical(s)
+}
+
+func printCanonical(s string) string {
+	f, err := syntax.NewParser().Parse(strings.NewReader(s), "")
+	if err != nil {
+		return "unparsed:" + s
+	}
+	var b bytes.Buffer
+	if err := syntax.NewPrinter(syntax.Minify(true)).Print(&b, f); err != nil {
+		return "unparsed:" + s
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// mustJSON marshals v, one of BuildKit's instruction types, which hold only
+// strings, numbers, booleans and slices of them.
 func mustJSON(v any) string {
 	b, err := json.Marshal(v)
 	if err != nil {
-		return fmt.Sprintf("unmarshalable(%v)", err)
+		panic(fmt.Sprintf("marshaling %T: %v", v, err))
 	}
 	return string(b)
-}
-
-// equivalent reports whether formatted (the formatter's output for original)
-// means the same to BuildKit as original. reason explains a mismatch.
-func equivalent(original *parser.Node, formatted string, ctx instrContext) (ok bool, reason string) {
-	want, wantErr := semanticKey(original, ctx)
-
-	src := formatted
-	if ctx.escape != '\\' {
-		src = "# escape=" + string(ctx.escape) + "\n" + src
-	}
-	res, err := parser.Parse(strings.NewReader(src))
-	if err != nil {
-		return false, fmt.Sprintf("output does not parse: %v", err)
-	}
-	if len(res.AST.Children) != 1 {
-		return false, fmt.Sprintf("output parses as %d instructions", len(res.AST.Children))
-	}
-	got, gotErr := semanticKey(res.AST.Children[0], ctx)
-	switch {
-	case wantErr != nil && gotErr != nil:
-		// The original is already invalid (e.g. "ONBUILD ARG" with no name);
-		// output that is invalid too can't break a working build.
-		return true, ""
-	case wantErr != nil:
-		return false, fmt.Sprintf("original is invalid (%v) but output is not", wantErr)
-	case gotErr != nil:
-		return false, fmt.Sprintf("output is invalid: %v", gotErr)
-	}
-	if got != want {
-		return false, "output differs in meaning"
-	}
-	return true, ""
 }
